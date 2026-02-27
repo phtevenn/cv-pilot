@@ -35,11 +35,11 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
 
-  exportPdf: async (content: string): Promise<Blob> => {
+  exportPdf: async (html: string): Promise<Blob> => {
     const resp = await fetch(`${API_BASE}/api/export/pdf`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ html }),
     })
     if (!resp.ok) throw new Error('PDF export failed')
     return resp.blob()

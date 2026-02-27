@@ -17,6 +17,7 @@ export default function EditorPage() {
   const [showOptimize, setShowOptimize] = useState(false)
   const [exporting, setExporting] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     api
@@ -44,7 +45,9 @@ export default function EditorPage() {
   const handleExportPdf = async () => {
     setExporting(true)
     try {
-      const blob = await api.exportPdf(content)
+      const el = printRef.current
+      if (!el) throw new Error('Print target not found')
+      const blob = await api.exportPdf(el.innerHTML)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -98,6 +101,16 @@ export default function EditorPage() {
           onClose={() => setShowOptimize(false)}
         />
       )}
+
+      {/* Hidden print target — rendered off-screen so Playwright can capture exact preview HTML */}
+      <div
+        ref={printRef}
+        id="resume-print-target"
+        aria-hidden="true"
+        style={{ position: 'absolute', left: '-9999px', top: 0, width: '750px', pointerEvents: 'none' }}
+      >
+        <ResumePreview content={content} />
+      </div>
     </div>
   )
 }
