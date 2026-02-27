@@ -199,7 +199,7 @@ export default function ResumePreview({ content }: Props) {
   )
 
   return (
-    <div className="max-w-[750px] mx-auto bg-white shadow-md px-12 py-10 font-sans min-h-full">
+    <div className="max-w-[750px] mx-auto bg-white shadow-md px-8 py-6 font-sans">
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {content}
       </ReactMarkdown>

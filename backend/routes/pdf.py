@@ -38,14 +38,15 @@ async def export_pdf(
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
+        await page.set_viewport_size({"width": 900, "height": 20000})
         await page.set_content(full_html, wait_until="networkidle")
         pdf_bytes = await page.pdf(
             format="Letter",
             margin={
-                "top": "0.6in",
-                "bottom": "0.6in",
-                "left": "0.75in",
-                "right": "0.75in",
+                "top": "0.4in",
+                "bottom": "0.4in",
+                "left": "0.5in",
+                "right": "0.5in",
             },
             print_background=True,
         )
