@@ -3,10 +3,9 @@ import CodeMirror from '@uiw/react-codemirror'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { oneDark } from '@codemirror/theme-one-dark'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import Toolbar from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
+import ResumePreview from '../components/ResumePreview'
 import { api } from '../api/client'
 
 const AUTOSAVE_DELAY_MS = 800
@@ -88,10 +87,8 @@ export default function EditorPage() {
         </div>
 
         {/* Preview pane */}
-        <div className="flex-1 min-w-0 overflow-auto bg-white p-8">
-          <div className="prose prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          </div>
+        <div className="flex-1 min-w-0 overflow-auto bg-gray-100 p-6">
+          <ResumePreview content={content} />
         </div>
       </div>
 
