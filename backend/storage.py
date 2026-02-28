@@ -1,4 +1,8 @@
+import json
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from config import RESUMES_DIR
 
@@ -79,24 +83,164 @@ Molloy ME, Aaron WH, Barath M, et al. HPN328, a trispecific T cell-activating pr
 Austin RJ, Lemon BD, Aaron WH, et al. TriTACs, a novel class of T-cell-engaging protein constructs designed for the treatment of solid tumors. Mol Cancer Ther. 20(1):109-120. doi:10.1158/1535-7163.MCT-20-0061
 """
 
+DEFAULT_VERSION_NAME = "Base"
 
-def _resume_path(user_id: str) -> Path:
-    return RESUMES_DIR / f"{user_id}.md"
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _user_dir(user_id: str) -> Path:
+    d = RESUMES_DIR / user_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _manifest_path(user_id: str) -> Path:
+    return _user_dir(user_id) / "manifest.json"
+
+
+def _version_path(user_id: str, version_id: str) -> Path:
+    return _user_dir(user_id) / f"{version_id}.md"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_manifest(user_id: str) -> dict:
+    path = _manifest_path(user_id)
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {"active_version_id": None, "versions": []}
+
+
+def _save_manifest(user_id: str, manifest: dict) -> None:
+    _manifest_path(user_id).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _create_version_internal(user_id: str, name: str, content: str) -> dict:
+    manifest = _load_manifest(user_id)
+    vid = str(uuid.uuid4())
+    now = _now()
+    meta: dict = {"id": vid, "name": name, "created_at": now, "updated_at": now}
+    manifest["versions"].append(meta)
+    if manifest["active_version_id"] is None:
+        manifest["active_version_id"] = vid
+    _save_manifest(user_id, manifest)
+    _version_path(user_id, vid).write_text(content, encoding="utf-8")
+    return meta
+
+
+def _migrate_legacy(user_id: str) -> None:
+    """Migrate old flat {user_id}.md file to the versioned directory layout."""
+    legacy = RESUMES_DIR / f"{user_id}.md"
+    if legacy.exists() and not _manifest_path(user_id).exists():
+        content = legacy.read_text(encoding="utf-8")
+        _create_version_internal(user_id, DEFAULT_VERSION_NAME, content)
+        legacy.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def init_user(user_id: str) -> None:
-    """Seed a new user's resume with the sample template if none exists."""
-    path = _resume_path(user_id)
-    if not path.exists():
-        path.write_text(SAMPLE_RESUME, encoding="utf-8")
+    """Ensure a user has at least one version, seeding with the sample if new."""
+    _migrate_legacy(user_id)
+    manifest = _load_manifest(user_id)
+    if not manifest["versions"]:
+        _create_version_internal(user_id, DEFAULT_VERSION_NAME, SAMPLE_RESUME)
 
 
-def load_resume(user_id: str) -> str:
-    path = _resume_path(user_id)
+def list_versions(user_id: str) -> list[dict]:
+    init_user(user_id)
+    manifest = _load_manifest(user_id)
+    active_id = manifest["active_version_id"]
+    return [{**v, "is_active": v["id"] == active_id} for v in manifest["versions"]]
+
+
+def create_version(user_id: str, name: str, content: str) -> dict:
+    init_user(user_id)
+    return _create_version_internal(user_id, name, content)
+
+
+def load_version(user_id: str, version_id: str) -> Optional[str]:
+    path = _version_path(user_id, version_id)
     if not path.exists():
-        init_user(user_id)
+        return None
     return path.read_text(encoding="utf-8")
 
 
+def save_version(
+    user_id: str,
+    version_id: str,
+    content: Optional[str] = None,
+    new_name: Optional[str] = None,
+) -> Optional[dict]:
+    """Update content and/or name of a version. Returns updated metadata or None if not found."""
+    manifest = _load_manifest(user_id)
+    for v in manifest["versions"]:
+        if v["id"] == version_id:
+            v["updated_at"] = _now()
+            if new_name is not None:
+                v["name"] = new_name
+            _save_manifest(user_id, manifest)
+            if content is not None:
+                _version_path(user_id, version_id).write_text(content, encoding="utf-8")
+            return dict(v)
+    return None
+
+
+def delete_version(user_id: str, version_id: str) -> bool:
+    """Delete a version. Returns False (and does nothing) if it's the last one."""
+    manifest = _load_manifest(user_id)
+    versions = manifest["versions"]
+    if len(versions) <= 1:
+        return False
+    manifest["versions"] = [v for v in versions if v["id"] != version_id]
+    if manifest["active_version_id"] == version_id:
+        manifest["active_version_id"] = manifest["versions"][0]["id"]
+    _save_manifest(user_id, manifest)
+    path = _version_path(user_id, version_id)
+    if path.exists():
+        path.unlink()
+    return True
+
+
+def get_active_version_id(user_id: str) -> Optional[str]:
+    init_user(user_id)
+    return _load_manifest(user_id)["active_version_id"]
+
+
+def set_active_version(user_id: str, version_id: str) -> bool:
+    manifest = _load_manifest(user_id)
+    ids = {v["id"] for v in manifest["versions"]}
+    if version_id not in ids:
+        return False
+    manifest["active_version_id"] = version_id
+    _save_manifest(user_id, manifest)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat wrappers (used by existing GET/PUT /api/resume endpoints)
+# ---------------------------------------------------------------------------
+
+
+def load_resume(user_id: str) -> str:
+    init_user(user_id)
+    active_id = get_active_version_id(user_id)
+    if active_id is None:
+        return SAMPLE_RESUME
+    content = load_version(user_id, active_id)
+    return content if content is not None else SAMPLE_RESUME
+
+
 def save_resume(user_id: str, content: str) -> None:
-    _resume_path(user_id).write_text(content, encoding="utf-8")
+    init_user(user_id)
+    active_id = get_active_version_id(user_id)
+    if active_id:
+        save_version(user_id, active_id, content=content)
