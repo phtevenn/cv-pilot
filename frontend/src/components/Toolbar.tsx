@@ -1,4 +1,6 @@
 import { useAuth } from '../context/AuthContext'
+import VersionSelector from './VersionSelector'
+import type { VersionMeta } from '../api/client'
 
 interface ToolbarProps {
   saving: boolean
@@ -6,6 +8,14 @@ interface ToolbarProps {
   onOptimize: () => void
   onExportPdf: () => void
   exporting: boolean
+  versions: VersionMeta[]
+  activeVersionId: string | null
+  onSelectVersion: (id: string) => void
+  onNewVersion: () => void
+  onRenameVersion: () => void
+  onDeleteVersion: () => void
+  onExportMd: () => void
+  onImportMd: React.ChangeEventHandler<HTMLInputElement>
 }
 
 export default function Toolbar({
@@ -14,6 +24,14 @@ export default function Toolbar({
   onOptimize,
   onExportPdf,
   exporting,
+  versions,
+  activeVersionId,
+  onSelectVersion,
+  onNewVersion,
+  onRenameVersion,
+  onDeleteVersion,
+  onExportMd,
+  onImportMd,
 }: ToolbarProps) {
   const { user, logout } = useAuth()
 
@@ -29,6 +47,14 @@ export default function Toolbar({
     <header className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 shrink-0 z-10">
       <div className="flex items-center gap-3">
         <span className="text-white font-semibold text-sm tracking-tight">CV Pilot</span>
+        <VersionSelector
+          versions={versions}
+          activeVersionId={activeVersionId}
+          onSelect={onSelectVersion}
+          onNew={onNewVersion}
+          onRename={onRenameVersion}
+          onDelete={onDeleteVersion}
+        />
         <span className="text-xs">{saveStatus}</span>
       </div>
 
@@ -47,6 +73,23 @@ export default function Toolbar({
         >
           {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
+
+        <button
+          onClick={onExportMd}
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Export .md
+        </button>
+
+        <label className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors cursor-pointer">
+          Import .md
+          <input
+            type="file"
+            accept=".md,text/markdown"
+            className="sr-only"
+            onChange={onImportMd}
+          />
+        </label>
 
         {user && (
           <div className="flex items-center gap-2 ml-1 pl-3 border-l border-gray-700">
