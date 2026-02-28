@@ -9,24 +9,15 @@ from deps import get_current_user
 router = APIRouter()
 
 _SYSTEM_PROMPT = """\
-You are a professional resume coach and career advisor. Analyze the provided resume against \
-the job description and give specific, actionable feedback.
+You are a professional resume optimizer. Given a resume in Markdown format and a job description, \
+rewrite the resume to better target the role.
 
-Structure your response with these sections:
-
-## Match Analysis
-How well the resume aligns with the role (be concise).
-
-## Key Improvements
-Specific bullet points to strengthen or rephrase.
-
-## Skills to Highlight
-Missing or underemphasized skills the job description calls for.
-
-## Suggested Rewrites
-Rewritten versions of key bullet points or sections, ready to paste in.
-
-Be direct, specific, and focus on impact-driven language."""
+CRITICAL RULES:
+- Return ONLY the revised resume in Markdown format.
+- No commentary, no explanations, no preamble, no postamble.
+- Preserve the exact same Markdown structure and formatting conventions.
+- Strengthen bullet points with impact-driven language and relevant keywords from the job description.
+- Do not invent experience or credentials that are not in the original resume."""
 
 _USER_TEMPLATE = """\
 ## Resume
@@ -35,9 +26,7 @@ _USER_TEMPLATE = """\
 
 ## Job Description
 
-{job}
-
-Please analyze and provide tailored improvement suggestions."""
+{job}"""
 
 
 @router.post("/optimize")
