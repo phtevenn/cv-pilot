@@ -1,6 +1,14 @@
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000'
 
+export interface VersionMeta {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+  is_active: boolean
+}
+
 function getToken(): string | null {
   return localStorage.getItem('cv_pilot_token')
 }
@@ -34,6 +42,26 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
+
+  listVersions: () => request<VersionMeta[]>('/api/resume/versions'),
+
+  createVersion: (name: string, content: string) =>
+    request<VersionMeta>('/api/resume/versions', {
+      method: 'POST',
+      body: JSON.stringify({ name, content }),
+    }),
+
+  loadVersion: (id: string) =>
+    request<{ content: string; version_id: string }>(`/api/resume/versions/${id}`),
+
+  updateVersion: (id: string, body: { content?: string; name?: string }) =>
+    request<VersionMeta>(`/api/resume/versions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteVersion: (id: string) =>
+    request<{ ok: boolean }>(`/api/resume/versions/${id}`, { method: 'DELETE' }),
 
   exportPdf: async (html: string): Promise<Blob> => {
     const resp = await fetch(`${API_BASE}/api/export/pdf`, {
