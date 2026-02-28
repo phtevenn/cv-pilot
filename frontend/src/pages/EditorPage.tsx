@@ -4,10 +4,19 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { oneDark } from '@codemirror/theme-one-dark'
 import Toolbar from '../components/Toolbar'
+import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
 import ResumePreview from '../components/ResumePreview'
+import InlineDiffView from '../components/InlineDiffView'
 import { api } from '../api/client'
 import type { VersionMeta } from '../api/client'
+import {
+  computeLineDiff,
+  resolveHunks,
+  countChangedHunks,
+  countPendingHunks,
+} from '../utils/diff'
+import type { DiffHunk, HunkStatus } from '../utils/diff'
 
 const AUTOSAVE_DELAY_MS = 800
 
@@ -19,6 +28,7 @@ export default function EditorPage() {
   const [exporting, setExporting] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
+  const [diffHunks, setDiffHunks] = useState<DiffHunk[] | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
@@ -27,6 +37,18 @@ export default function EditorPage() {
   useEffect(() => {
     contentRef.current = content
   }, [content])
+
+  // Auto-apply when the user has individually resolved every changed hunk
+  useEffect(() => {
+    if (!diffHunks) return
+    if (countPendingHunks(diffHunks) === 0) {
+      const resolved = resolveHunks(diffHunks)
+      handleChange(resolved)
+      setDiffHunks(null)
+    }
+    // handleChange is stable, diffHunks identity changes only when we update it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffHunks])
 
   useEffect(() => {
     Promise.all([api.getResume(), api.listVersions()])
@@ -155,6 +177,58 @@ export default function EditorPage() {
     setVersions(vers)
   }, [])
 
+  // ── Inline diff handlers ─────────────────────────────────────────────────
+
+  const handleRevision = useCallback((revised: string) => {
+    const hunks = computeLineDiff(contentRef.current, revised)
+    if (countChangedHunks(hunks) === 0) return // identical — nothing to show
+    setDiffHunks(hunks)
+  }, [])
+
+  const handleAcceptHunk = useCallback((id: string) => {
+    setDiffHunks((prev) =>
+      prev
+        ? prev.map((h) => (h.id === id ? { ...h, status: 'accepted' as HunkStatus } : h))
+        : null,
+    )
+  }, [])
+
+  const handleDeclineHunk = useCallback((id: string) => {
+    setDiffHunks((prev) =>
+      prev
+        ? prev.map((h) => (h.id === id ? { ...h, status: 'declined' as HunkStatus } : h))
+        : null,
+    )
+  }, [])
+
+  const handleAcceptAll = useCallback(() => {
+    setDiffHunks((prev) => {
+      if (!prev) return null
+      return prev.map((h) =>
+        h.type === 'changed' ? { ...h, status: 'accepted' as HunkStatus } : h,
+      )
+    })
+    // useEffect will detect pendingCount === 0 and apply+exit
+  }, [])
+
+  const handleDeclineAll = useCallback(() => {
+    setDiffHunks((prev) => {
+      if (!prev) return null
+      return prev.map((h) =>
+        h.type === 'changed' ? { ...h, status: 'declined' as HunkStatus } : h,
+      )
+    })
+  }, [])
+
+  const diffControls: DiffControls | undefined = diffHunks
+    ? {
+        pendingCount: countPendingHunks(diffHunks),
+        totalCount: countChangedHunks(diffHunks),
+        onAcceptAll: handleAcceptAll,
+        onDeclineAll: handleDeclineAll,
+      }
+    : undefined
+
   return (
     <div className="flex flex-col h-screen bg-gray-950">
       <Toolbar
@@ -171,6 +245,7 @@ export default function EditorPage() {
         onDeleteVersion={handleDeleteVersion}
         onExportMd={handleExportMd}
         onImportMd={handleImportMd}
+        diffControls={diffControls}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -191,9 +266,17 @@ export default function EditorPage() {
           />
         </div>
 
-        {/* Preview pane */}
+        {/* Preview pane — shows inline diff when reviewing AI changes */}
         <div className="flex-1 min-w-0 overflow-auto bg-gray-100 p-6">
-          <ResumePreview content={content} />
+          {diffHunks ? (
+            <InlineDiffView
+              hunks={diffHunks}
+              onAccept={handleAcceptHunk}
+              onDecline={handleDeclineHunk}
+            />
+          ) : (
+            <ResumePreview content={content} />
+          )}
         </div>
       </div>
 
@@ -201,6 +284,7 @@ export default function EditorPage() {
         <OptimizeModal
           resumeContent={content}
           onClose={() => setShowOptimize(false)}
+          onRevision={handleRevision}
         />
       )}
 

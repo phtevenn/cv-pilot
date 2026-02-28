@@ -2,6 +2,13 @@ import { useAuth } from '../context/AuthContext'
 import VersionSelector from './VersionSelector'
 import type { VersionMeta } from '../api/client'
 
+export interface DiffControls {
+  pendingCount: number
+  totalCount: number
+  onAcceptAll: () => void
+  onDeclineAll: () => void
+}
+
 interface ToolbarProps {
   saving: boolean
   saveError: string | null
@@ -16,6 +23,7 @@ interface ToolbarProps {
   onDeleteVersion: () => void
   onExportMd: () => void
   onImportMd: React.ChangeEventHandler<HTMLInputElement>
+  diffControls?: DiffControls
 }
 
 export default function Toolbar({
@@ -32,6 +40,7 @@ export default function Toolbar({
   onDeleteVersion,
   onExportMd,
   onImportMd,
+  diffControls,
 }: ToolbarProps) {
   const { user, logout } = useAuth()
 
@@ -59,12 +68,34 @@ export default function Toolbar({
       </div>
 
       <div className="flex items-center gap-2">
-        <button
-          onClick={onOptimize}
-          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
-        >
-          ✦ Optimize with AI
-        </button>
+        {diffControls ? (
+          <>
+            <span className="text-gray-400 text-xs">
+              {diffControls.pendingCount > 0
+                ? `${diffControls.pendingCount} of ${diffControls.totalCount} pending`
+                : `${diffControls.totalCount} changes reviewed`}
+            </span>
+            <button
+              onClick={diffControls.onAcceptAll}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              ✓ Accept All
+            </button>
+            <button
+              onClick={diffControls.onDeclineAll}
+              className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              ✗ Decline All
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onOptimize}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            ✦ Optimize with AI
+          </button>
+        )}
 
         <button
           onClick={onExportPdf}
