@@ -78,12 +78,17 @@ export default function EditorPage() {
     if (!diffHunks) return
     if (countPendingHunks(diffHunks) === 0) {
       const resolved = resolveHunks(diffHunks)
-      handleChange(resolved)
-      setDiffHunks(null)
+      // resolved is clean markdown — serialize the pending blocks instead so the
+      // stored content uses the block-delimiter format, not raw markdown.
       if (pendingRevisionBlocksRef.current) {
+        const serialized = serializeBlocks(pendingRevisionBlocksRef.current)
+        handleChange(serialized)
         setBlocks(pendingRevisionBlocksRef.current)
         pendingRevisionBlocksRef.current = null
+      } else {
+        handleChange(resolved)
       }
+      setDiffHunks(null)
     }
     // handleChange is stable, diffHunks identity changes only when we update it
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,9 +245,13 @@ export default function EditorPage() {
   // ── Inline diff handlers ─────────────────────────────────────────────────
 
   const handleRevision = useCallback((revised: string) => {
-    const hunks = computeLineDiff(contentRef.current, revised)
+    // Convert current blocks to clean markdown for diffing
+    // (strip the <!-- block:... --> delimiter noise so both sides are in the same format)
+    const currentClean = blocksToMarkdown(blocksRef.current)
+    const hunks = computeLineDiff(currentClean, revised)
     if (countChangedHunks(hunks) === 0) return
     setDiffHunks(hunks)
+    // Store revised blocks so we can serialize them properly when the user accepts
     const revisedBlocks = deserializeBlocks(revised)
     pendingRevisionBlocksRef.current =
       revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
