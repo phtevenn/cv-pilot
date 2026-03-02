@@ -43,7 +43,7 @@ async def export_pdf(
         pdf_bytes = await page.pdf(
             format="Letter",
             margin={
-                "top": "0.4in",
+                "top": "0.25in",
                 "bottom": "0.4in",
                 "left": "0.5in",
                 "right": "0.5in",
