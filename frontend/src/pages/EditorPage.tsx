@@ -5,16 +5,16 @@ import OptimizeModal from '../components/OptimizeModal'
 import ChatPanel from '../components/ChatPanel'
 import BlockEditor from '../components/BlockEditor'
 import BlockResumePreview from '../components/BlockResumePreview'
-import InlineDiffView from '../components/InlineDiffView'
+import BlockDiffView from '../components/BlockDiffView'
 import { api, DEFAULT_MARGINS } from '../api/client'
 import type { ChatMessage, Margins, VersionMeta } from '../api/client'
 import {
-  computeLineDiff,
-  resolveHunks,
-  countChangedHunks,
-  countPendingHunks,
-} from '../utils/diff'
-import type { DiffHunk, HunkStatus } from '../utils/diff'
+  computeBlockDiff,
+  resolveBlockDiff,
+  countBlockDiffPending,
+  countBlockDiffTotal,
+} from '../utils/blockDiff'
+import type { BlockDiffEntry, BlockDiffStatus } from '../utils/blockDiff'
 import {
   blocksToMarkdown,
   deserializeBlocks,
@@ -43,7 +43,7 @@ export default function EditorPage() {
   const [exporting, setExporting] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
-  const [diffHunks, setDiffHunks] = useState<DiffHunk[] | null>(null)
+  const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
   const [showChat, setShowChat] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [editorWidthPct, setEditorWidthPct] = useState(50)
@@ -60,39 +60,29 @@ export default function EditorPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
-  const pendingRevisionBlocksRef = useRef<ResumeBlock[] | null>(null)
   const blocksRef = useRef(blocks)
 
-  // Keep a ref in sync so async handlers always see the latest content
+  // Keep refs in sync so async handlers always see the latest values
   useEffect(() => {
     contentRef.current = content
   }, [content])
 
-  // Keep blocksRef in sync so handleRevision can read current blocks without stale closure
   useEffect(() => {
     blocksRef.current = blocks
   }, [blocks])
 
-  // Auto-apply when the user has individually resolved every changed hunk
+  // Auto-apply when all block diff entries have been accepted or declined
   useEffect(() => {
-    if (!diffHunks) return
-    if (countPendingHunks(diffHunks) === 0) {
-      const resolved = resolveHunks(diffHunks)
-      // resolved is clean markdown — serialize the pending blocks instead so the
-      // stored content uses the block-delimiter format, not raw markdown.
-      if (pendingRevisionBlocksRef.current) {
-        const serialized = serializeBlocks(pendingRevisionBlocksRef.current)
-        handleChange(serialized)
-        setBlocks(pendingRevisionBlocksRef.current)
-        pendingRevisionBlocksRef.current = null
-      } else {
-        handleChange(resolved)
-      }
-      setDiffHunks(null)
+    if (!blockDiff) return
+    if (countBlockDiffPending(blockDiff) === 0) {
+      const finalBlocks = resolveBlockDiff(blockDiff)
+      setBlocks(finalBlocks)
+      handleChange(serializeBlocks(finalBlocks))
+      setBlockDiff(null)
     }
-    // handleChange is stable, diffHunks identity changes only when we update it
+    // handleChange is stable; blockDiff identity changes only when we update it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffHunks])
+  }, [blockDiff])
 
   const initBlocks = (markdown: string) => {
     const loaded = deserializeBlocks(markdown)
@@ -242,53 +232,50 @@ export default function EditorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Inline diff handlers ─────────────────────────────────────────────────
+  // ── Block diff handlers ───────────────────────────────────────────────────
 
   const handleRevision = useCallback((revised: string) => {
-    // Convert current blocks to clean markdown for diffing
-    // (strip the <!-- block:... --> delimiter noise so both sides are in the same format)
-    const currentClean = blocksToMarkdown(blocksRef.current)
-    const hunks = computeLineDiff(currentClean, revised)
-    if (countChangedHunks(hunks) === 0) return
-    setDiffHunks(hunks)
-    // Store revised blocks so we can serialize them properly when the user accepts
     const revisedBlocks = deserializeBlocks(revised)
-    pendingRevisionBlocksRef.current =
-      revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
+    const normalised = revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
+    const entries = computeBlockDiff(blocksRef.current, normalised)
+    if (countBlockDiffTotal(entries) === 0) return
+    setBlockDiff(entries)
   }, [])
 
-  const handleAcceptHunk = useCallback((id: string) => {
-    setDiffHunks((prev) =>
+  const handleAcceptBlock = useCallback((id: string) => {
+    setBlockDiff((prev) =>
       prev
-        ? prev.map((h) => (h.id === id ? { ...h, status: 'accepted' as HunkStatus } : h))
+        ? prev.map((e) => (e.id === id ? { ...e, status: 'accepted' as BlockDiffStatus } : e))
         : null,
     )
   }, [])
 
-  const handleDeclineHunk = useCallback((id: string) => {
-    setDiffHunks((prev) =>
+  const handleDeclineBlock = useCallback((id: string) => {
+    setBlockDiff((prev) =>
       prev
-        ? prev.map((h) => (h.id === id ? { ...h, status: 'declined' as HunkStatus } : h))
+        ? prev.map((e) => (e.id === id ? { ...e, status: 'declined' as BlockDiffStatus } : e))
         : null,
     )
   }, [])
 
   const handleAcceptAll = useCallback(() => {
-    setDiffHunks((prev) => {
-      if (!prev) return null
-      return prev.map((h) =>
-        h.type === 'changed' ? { ...h, status: 'accepted' as HunkStatus } : h,
-      )
-    })
+    setBlockDiff((prev) =>
+      prev
+        ? prev.map((e) =>
+            e.changeType !== 'unchanged' ? { ...e, status: 'accepted' as BlockDiffStatus } : e,
+          )
+        : null,
+    )
   }, [])
 
   const handleDeclineAll = useCallback(() => {
-    setDiffHunks((prev) => {
-      if (!prev) return null
-      return prev.map((h) =>
-        h.type === 'changed' ? { ...h, status: 'declined' as HunkStatus } : h,
-      )
-    })
+    setBlockDiff((prev) =>
+      prev
+        ? prev.map((e) =>
+            e.changeType !== 'unchanged' ? { ...e, status: 'declined' as BlockDiffStatus } : e,
+          )
+        : null,
+    )
   }, [])
 
   const handleMarginsChange = useCallback((m: Margins) => {
@@ -316,14 +303,17 @@ export default function EditorPage() {
     document.addEventListener('mouseup', onUp)
   }
 
-  const diffControls: DiffControls | undefined = diffHunks
+  const diffControls: DiffControls | undefined = blockDiff
     ? {
-        pendingCount: countPendingHunks(diffHunks),
-        totalCount: countChangedHunks(diffHunks),
+        pendingCount: countBlockDiffPending(blockDiff),
+        totalCount: countBlockDiffTotal(blockDiff),
         onAcceptAll: handleAcceptAll,
         onDeclineAll: handleDeclineAll,
       }
     : undefined
+
+  // Live preview: show the resolved state while reviewing block changes
+  const previewBlocks = blockDiff ? resolveBlockDiff(blockDiff) : blocks
 
   return (
     <div className="flex flex-col h-screen bg-gray-950">
@@ -350,9 +340,21 @@ export default function EditorPage() {
 
       <div className="flex flex-col flex-1 min-h-0">
         <div ref={panesRef} className="flex flex-1 min-h-0">
-          {/* Block editor pane */}
-          <div className="min-w-0 overflow-auto bg-gray-900" style={{ width: `${editorWidthPct}%` }}>
-            <BlockEditor blocks={blocks} onChange={handleBlocks} />
+          {/* Block editor / diff pane */}
+          <div className="min-w-0 overflow-hidden bg-gray-900 flex flex-col" style={{ width: `${editorWidthPct}%` }}>
+            {blockDiff ? (
+              <BlockDiffView
+                entries={blockDiff}
+                onAccept={handleAcceptBlock}
+                onDecline={handleDeclineBlock}
+                onAcceptAll={handleAcceptAll}
+                onDeclineAll={handleDeclineAll}
+              />
+            ) : (
+              <div className="overflow-auto flex-1">
+                <BlockEditor blocks={blocks} onChange={handleBlocks} />
+              </div>
+            )}
           </div>
 
           {/* Vertical resize handle */}
@@ -361,32 +363,24 @@ export default function EditorPage() {
             className="w-1 shrink-0 cursor-col-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
           />
 
-          {/* Preview pane */}
+          {/* Preview pane — always shows the live resume */}
           <div className="min-w-0 overflow-auto bg-gray-100 p-6 flex-1">
-            {diffHunks ? (
-              <InlineDiffView
-                hunks={diffHunks}
-                onAccept={handleAcceptHunk}
-                onDecline={handleDeclineHunk}
-              />
-            ) : (
-              <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
-                <BlockResumePreview blocks={blocks} />
-                {[1, 2].map((n) => (
-                  <div
-                    key={n}
-                    className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
-                    style={{ top: `${n * pageBreakHeight}px` }}
-                  >
-                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                    <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
-                      Page {n + 1}
-                    </span>
-                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
+              <BlockResumePreview blocks={previewBlocks} />
+              {[1, 2].map((n) => (
+                <div
+                  key={n}
+                  className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
+                  style={{ top: `${n * pageBreakHeight}px` }}
+                >
+                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                  <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
+                    Page {n + 1}
+                  </span>
+                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
