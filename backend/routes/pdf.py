@@ -13,11 +13,13 @@ _PDF_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  body {{ margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 </style>
 </head>
 <body class="font-sans bg-white">
+<div style="width:{content_width_px}px">
 {body}
+</div>
 </body>
 </html>
 """
@@ -36,7 +38,9 @@ async def export_pdf(
     left = float(m.get("left", 0.5))
     right = float(m.get("right", 0.5))
 
-    full_html = _PDF_TEMPLATE.format(body=html)
+    # Explicit pixel width of the printable area so content reflows identically to the preview
+    content_width_px = round((8.5 - left - right) * 96)
+    full_html = _PDF_TEMPLATE.format(body=html, content_width_px=content_width_px)
 
     from playwright.async_api import async_playwright
 

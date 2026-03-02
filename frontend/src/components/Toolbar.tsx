@@ -28,6 +28,8 @@ interface ToolbarProps {
   margins: Margins
   onMarginsChange: (m: Margins) => void
   diffControls?: DiffControls
+  showChat: boolean
+  onToggleChat: () => void
 }
 
 function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: Margins) => void }) {
@@ -100,6 +102,8 @@ export default function Toolbar({
   margins,
   onMarginsChange,
   diffControls,
+  showChat,
+  onToggleChat,
 }: ToolbarProps) {
   const { user, logout } = useAuth()
 
@@ -155,6 +159,17 @@ export default function Toolbar({
             ✦ Optimize with AI
           </button>
         )}
+
+        <button
+          onClick={onToggleChat}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            showChat
+              ? 'bg-indigo-700 text-white ring-1 ring-indigo-400'
+              : 'bg-gray-700 hover:bg-gray-600 text-white'
+          }`}
+        >
+          ✦ Chat
+        </button>
 
         <button
           onClick={onExportPdf}

@@ -6,10 +6,11 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
+import ChatPanel from '../components/ChatPanel'
 import ResumePreview from '../components/ResumePreview'
 import InlineDiffView from '../components/InlineDiffView'
 import { api, DEFAULT_MARGINS } from '../api/client'
-import type { Margins, VersionMeta } from '../api/client'
+import type { ChatMessage, Margins, VersionMeta } from '../api/client'
 import {
   computeLineDiff,
   resolveHunks,
@@ -37,6 +38,11 @@ export default function EditorPage() {
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [diffHunks, setDiffHunks] = useState<DiffHunk[] | null>(null)
+  const [showChat, setShowChat] = useState(false)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [editorWidthPct, setEditorWidthPct] = useState(50)
+  const [chatHeight, setChatHeight] = useState(320)
+  const panesRef = useRef<HTMLDivElement>(null)
   const [margins, setMargins] = useState<Margins>(() => {
     try {
       const stored = localStorage.getItem(MARGINS_STORAGE_KEY)
@@ -242,6 +248,25 @@ export default function EditorPage() {
   }, [])
 
   const pageBreakHeight = Math.round((11 - margins.top - margins.bottom) * 96)
+  // Match the PDF's printable content width: (paper width − left − right) × 96 dpi
+  const printableWidthPx = Math.round((8.5 - margins.left - margins.right) * 96)
+
+  const handleVerticalDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startPct = editorWidthPct
+    const containerWidth = panesRef.current?.getBoundingClientRect().width ?? 1
+    const onMove = (ev: MouseEvent) => {
+      const deltaPct = ((ev.clientX - startX) / containerWidth) * 100
+      setEditorWidthPct(Math.min(80, Math.max(20, startPct + deltaPct)))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   const diffControls: DiffControls | undefined = diffHunks
     ? {
@@ -271,53 +296,75 @@ export default function EditorPage() {
         margins={margins}
         onMarginsChange={handleMarginsChange}
         diffControls={diffControls}
+        showChat={showChat}
+        onToggleChat={() => setShowChat((v) => !v)}
       />
 
-      <div className="flex flex-1 min-h-0">
-        {/* Editor pane */}
-        <div className="flex-1 min-w-0 overflow-hidden border-r border-gray-700">
-          <CodeMirror
-            value={content}
-            height="100%"
-            extensions={[markdown({ base: markdownLanguage, codeLanguages: languages })]}
-            theme={oneDark}
-            onChange={handleChange}
-            style={{ height: '100%', fontSize: '13px' }}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: false,
-              highlightActiveLine: true,
-            }}
+      <div className="flex flex-col flex-1 min-h-0">
+        <div ref={panesRef} className="flex flex-1 min-h-0">
+          {/* Editor pane */}
+          <div className="min-w-0 overflow-hidden" style={{ width: `${editorWidthPct}%` }}>
+            <CodeMirror
+              value={content}
+              height="100%"
+              extensions={[markdown({ base: markdownLanguage, codeLanguages: languages })]}
+              theme={oneDark}
+              onChange={handleChange}
+              style={{ height: '100%', fontSize: '13px' }}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: false,
+                highlightActiveLine: true,
+              }}
+            />
+          </div>
+
+          {/* Vertical resize handle */}
+          <div
+            onMouseDown={handleVerticalDividerMouseDown}
+            className="w-1 shrink-0 cursor-col-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
           />
+
+          {/* Preview pane — shows inline diff when reviewing AI changes */}
+          <div className="min-w-0 overflow-auto bg-gray-100 p-6 flex-1">
+            {diffHunks ? (
+              <InlineDiffView
+                hunks={diffHunks}
+                onAccept={handleAcceptHunk}
+                onDecline={handleDeclineHunk}
+              />
+            ) : (
+              <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
+                <ResumePreview content={content} />
+                {[1, 2].map((n) => (
+                  <div
+                    key={n}
+                    className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
+                    style={{ top: `${n * pageBreakHeight}px` }}
+                  >
+                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                    <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
+                      Page {n + 1}
+                    </span>
+                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Preview pane — shows inline diff when reviewing AI changes */}
-        <div className="flex-1 min-w-0 overflow-auto bg-gray-100 p-6">
-          {diffHunks ? (
-            <InlineDiffView
-              hunks={diffHunks}
-              onAccept={handleAcceptHunk}
-              onDecline={handleDeclineHunk}
-            />
-          ) : (
-            <div className="relative max-w-[750px] mx-auto">
-              <ResumePreview content={content} />
-              {[1, 2].map((n) => (
-                <div
-                  key={n}
-                  className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
-                  style={{ top: `${n * pageBreakHeight}px` }}
-                >
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                  <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
-                    Page {n + 1}
-                  </span>
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {showChat && (
+          <ChatPanel
+            messages={chatMessages}
+            onMessagesChange={setChatMessages}
+            resume={content}
+            onRevision={handleRevision}
+            onClose={() => setShowChat(false)}
+            height={chatHeight}
+            onHeightChange={setChatHeight}
+          />
+        )}
       </div>
 
       {showOptimize && (
@@ -334,7 +381,7 @@ export default function EditorPage() {
         ref={printRef}
         id="resume-print-target"
         aria-hidden="true"
-        style={{ position: 'absolute', left: '-9999px', top: 0, width: '750px', pointerEvents: 'none' }}
+        style={{ position: 'absolute', left: '-9999px', top: 0, width: `${printableWidthPx}px`, pointerEvents: 'none' }}
       >
         <ResumePreview content={content} />
       </div>
