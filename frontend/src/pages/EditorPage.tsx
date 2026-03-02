@@ -34,6 +34,7 @@ export default function EditorPage() {
   const [showOptimize, setShowOptimize] = useState(() => {
     return !!sessionStorage.getItem('cv_pilot_prefill_job')
   })
+  const [blocksLoaded, setBlocksLoaded] = useState(false)
   const [prefillJob] = useState<string>(() => {
     const prefill = sessionStorage.getItem('cv_pilot_prefill_job') ?? ''
     if (prefill) sessionStorage.removeItem('cv_pilot_prefill_job')
@@ -60,11 +61,17 @@ export default function EditorPage() {
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
   const pendingRevisionBlocksRef = useRef<ResumeBlock[] | null>(null)
+  const blocksRef = useRef(blocks)
 
   // Keep a ref in sync so async handlers always see the latest content
   useEffect(() => {
     contentRef.current = content
   }, [content])
+
+  // Keep blocksRef in sync so handleRevision can read current blocks without stale closure
+  useEffect(() => {
+    blocksRef.current = blocks
+  }, [blocks])
 
   // Auto-apply when the user has individually resolved every changed hunk
   useEffect(() => {
@@ -95,6 +102,7 @@ export default function EditorPage() {
         setVersions(vers)
         const active = vers.find((v) => v.is_active)
         if (active) setActiveVersionId(active.id)
+        setBlocksLoaded(true)
       })
       .catch((e: unknown) => console.error('Failed to load resume:', e))
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -386,7 +394,7 @@ export default function EditorPage() {
         )}
       </div>
 
-      {showOptimize && (
+      {showOptimize && blocksLoaded && (
         <OptimizeModal
           resumeContent={blocksToMarkdown(blocks)}
           onClose={() => setShowOptimize(false)}
