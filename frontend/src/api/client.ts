@@ -1,6 +1,20 @@
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000'
 
+export interface JobResult {
+  id: string
+  title: string
+  company: string
+  location: string
+  salary: string | null
+  description: string
+  apply_url: string
+  source: string
+  posted_at: string
+  match_score: number
+  match_reason: string
+}
+
 export interface VersionMeta {
   id: string
   name: string
@@ -72,6 +86,15 @@ export const api = {
     if (!resp.ok) throw new Error('PDF export failed')
     return resp.blob()
   },
+
+  searchJobs: (params: {
+    job_titles: string
+    location: string
+    remote_only: boolean
+  }) => request<JobResult[]>('/api/jobs/search', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
 
   optimizeStream: async (
     resume: string,

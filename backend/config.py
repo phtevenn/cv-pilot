@@ -12,6 +12,8 @@ ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+JSEARCH_API_KEY: str = os.getenv("JSEARCH_API_KEY", "")
+RAPIDAPI_HOST: str = "jsearch.p.rapidapi.com"
 
 DATA_DIR = Path(__file__).parent / "data"
 RESUMES_DIR = DATA_DIR / "resumes"

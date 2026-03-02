@@ -1,10 +1,18 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './pages/LoginPage'
 import EditorPage from './pages/EditorPage'
+import JobsPage from './pages/JobsPage'
 
 function AppInner() {
   const { user, login, isLoading } = useAuth()
+  const [path, setPath] = useState(window.location.pathname)
+
+  useEffect(() => {
+    const handler = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', handler)
+    return () => window.removeEventListener('popstate', handler)
+  }, [])
 
   useEffect(() => {
     if (window.location.pathname !== '/auth/callback') return
@@ -13,6 +21,7 @@ function AppInner() {
     if (token) {
       login(token)
       window.history.replaceState({}, '', '/')
+      setPath('/')
     }
   }, [login])
 
@@ -24,7 +33,9 @@ function AppInner() {
     )
   }
 
-  return user ? <EditorPage /> : <LoginPage />
+  if (!user) return <LoginPage />
+  if (path === '/jobs') return <JobsPage />
+  return <EditorPage />
 }
 
 export default function App() {

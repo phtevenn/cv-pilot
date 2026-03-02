@@ -24,7 +24,14 @@ export default function EditorPage() {
   const [content, setContent] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [showOptimize, setShowOptimize] = useState(false)
+  const [showOptimize, setShowOptimize] = useState(() => {
+    return !!sessionStorage.getItem('cv_pilot_prefill_job')
+  })
+  const [prefillJob] = useState<string>(() => {
+    const prefill = sessionStorage.getItem('cv_pilot_prefill_job') ?? ''
+    if (prefill) sessionStorage.removeItem('cv_pilot_prefill_job')
+    return prefill
+  })
   const [exporting, setExporting] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
@@ -285,6 +292,7 @@ export default function EditorPage() {
           resumeContent={content}
           onClose={() => setShowOptimize(false)}
           onRevision={handleRevision}
+          initialJobDescription={prefillJob || undefined}
         />
       )}
 
