@@ -10,6 +10,11 @@ export interface Margins {
 
 export const DEFAULT_MARGINS: Margins = { top: 0.25, bottom: 0.4, left: 0.5, right: 0.5 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface JobResult {
   id: string
   title: string
@@ -104,6 +109,42 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(params),
   }),
+
+  chatStream: async (
+    resume: string,
+    messages: ChatMessage[],
+    onChunk: (text: string) => void,
+  ): Promise<void> => {
+    const resp = await fetch(`${API_BASE}/api/llm/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ resume, messages }),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: 'Chat request failed' }))
+      throw new Error((err as { detail?: string }).detail ?? 'Chat request failed')
+    }
+
+    const reader = resp.body!.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') return
+        try {
+          const parsed = JSON.parse(data) as { text?: string }
+          if (parsed.text) onChunk(parsed.text)
+        } catch {
+          // ignore malformed SSE chunks
+        }
+      }
+    }
+  },
 
   optimizeStream: async (
     resume: string,
