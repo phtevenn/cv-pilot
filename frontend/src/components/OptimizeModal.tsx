@@ -6,10 +6,12 @@ interface Props {
   onClose: () => void
   /** Called with the full revised resume markdown when streaming completes. */
   onRevision: (revised: string) => void
+  /** Pre-fill the job description textarea (e.g. when launched from Find Jobs). */
+  initialJobDescription?: string
 }
 
-export default function OptimizeModal({ resumeContent, onClose, onRevision }: Props) {
-  const [jobDescription, setJobDescription] = useState('')
+export default function OptimizeModal({ resumeContent, onClose, onRevision, initialJobDescription }: Props) {
+  const [jobDescription, setJobDescription] = useState(initialJobDescription ?? '')
   const [loading, setLoading] = useState(false)
   const [charCount, setCharCount] = useState(0)
   const [error, setError] = useState<string | null>(null)

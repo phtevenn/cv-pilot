@@ -1,6 +1,7 @@
 import { useAuth } from '../context/AuthContext'
 import VersionSelector from './VersionSelector'
 import type { VersionMeta } from '../api/client'
+import { navigate } from '../utils/navigate'
 
 export interface DiffControls {
   pendingCount: number
@@ -121,6 +122,13 @@ export default function Toolbar({
             onChange={onImportMd}
           />
         </label>
+
+        <button
+          onClick={() => navigate('/jobs')}
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Find Jobs
+        </button>
 
         {user && (
           <div className="flex items-center gap-2 ml-1 pl-3 border-l border-gray-700">
