@@ -30,6 +30,11 @@ async def export_pdf(
 ) -> Response:
     body = await request.json()
     html: str = body.get("html", "")
+    m = body.get("margins") or {}
+    top = float(m.get("top", 0.25))
+    bottom = float(m.get("bottom", 0.4))
+    left = float(m.get("left", 0.5))
+    right = float(m.get("right", 0.5))
 
     full_html = _PDF_TEMPLATE.format(body=html)
 
@@ -43,10 +48,10 @@ async def export_pdf(
         pdf_bytes = await page.pdf(
             format="Letter",
             margin={
-                "top": "0.25in",
-                "bottom": "0.4in",
-                "left": "0.5in",
-                "right": "0.5in",
+                "top": f"{top}in",
+                "bottom": f"{bottom}in",
+                "left": f"{left}in",
+                "right": f"{right}in",
             },
             print_background=True,
         )
