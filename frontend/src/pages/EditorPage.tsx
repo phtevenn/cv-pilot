@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { languages } from '@codemirror/language-data'
-import { oneDark } from '@codemirror/theme-one-dark'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
-import ResumePreview from '../components/ResumePreview'
+import BlockEditor from '../components/BlockEditor'
+import BlockResumePreview from '../components/BlockResumePreview'
 import InlineDiffView from '../components/InlineDiffView'
 import { api } from '../api/client'
 import type { VersionMeta } from '../api/client'
@@ -17,11 +14,19 @@ import {
   countPendingHunks,
 } from '../utils/diff'
 import type { DiffHunk, HunkStatus } from '../utils/diff'
+import {
+  blocksToMarkdown,
+  deserializeBlocks,
+  migrateMarkdownToBlocks,
+  serializeBlocks,
+} from '../utils/blocks'
+import type { ResumeBlock } from '../types/blocks'
 
 const AUTOSAVE_DELAY_MS = 800
 
 export default function EditorPage() {
   const [content, setContent] = useState('')
+  const [blocks, setBlocks] = useState<ResumeBlock[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showOptimize, setShowOptimize] = useState(() => {
@@ -39,6 +44,7 @@ export default function EditorPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
+  const pendingRevisionBlocksRef = useRef<ResumeBlock[] | null>(null)
 
   // Keep a ref in sync so async handlers always see the latest content
   useEffect(() => {
@@ -52,6 +58,10 @@ export default function EditorPage() {
       const resolved = resolveHunks(diffHunks)
       handleChange(resolved)
       setDiffHunks(null)
+      if (pendingRevisionBlocksRef.current) {
+        setBlocks(pendingRevisionBlocksRef.current)
+        pendingRevisionBlocksRef.current = null
+      }
     }
     // handleChange is stable, diffHunks identity changes only when we update it
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -61,6 +71,8 @@ export default function EditorPage() {
     Promise.all([api.getResume(), api.listVersions()])
       .then(([resume, vers]) => {
         setContent(resume.content)
+        const loaded = deserializeBlocks(resume.content)
+        setBlocks(loaded.length > 0 ? loaded : migrateMarkdownToBlocks(resume.content))
         setVersions(vers)
         const active = vers.find((v) => v.is_active)
         if (active) setActiveVersionId(active.id)
@@ -92,6 +104,14 @@ export default function EditorPage() {
     }, AUTOSAVE_DELAY_MS)
   }, [])
 
+  const handleBlocks = useCallback(
+    (newBlocks: ResumeBlock[]) => {
+      setBlocks(newBlocks)
+      handleChange(serializeBlocks(newBlocks))
+    },
+    [handleChange],
+  )
+
   const handleExportPdf = async () => {
     setExporting(true)
     try {
@@ -117,6 +137,8 @@ export default function EditorPage() {
       await flushSave()
       const data = await api.loadVersion(id)
       setContent(data.content)
+      const loaded = deserializeBlocks(data.content)
+      setBlocks(loaded.length > 0 ? loaded : migrateMarkdownToBlocks(data.content))
       setActiveVersionId(id)
       const vers = await api.listVersions()
       setVersions(vers)
@@ -151,6 +173,8 @@ export default function EditorPage() {
     await api.deleteVersion(activeVersionId!)
     const [resume, vers] = await Promise.all([api.getResume(), api.listVersions()])
     setContent(resume.content)
+    const loaded = deserializeBlocks(resume.content)
+    setBlocks(loaded.length > 0 ? loaded : migrateMarkdownToBlocks(resume.content))
     setVersions(vers)
     const newActive = vers.find((v) => v.is_active)
     if (newActive) setActiveVersionId(newActive.id)
@@ -179,6 +203,8 @@ export default function EditorPage() {
     if (!name?.trim()) return
     const meta = await api.createVersion(name.trim(), text)
     setContent(text)
+    const loaded = deserializeBlocks(text)
+    setBlocks(loaded.length > 0 ? loaded : migrateMarkdownToBlocks(text))
     setActiveVersionId(meta.id)
     const vers = await api.listVersions()
     setVersions(vers)
@@ -190,6 +216,10 @@ export default function EditorPage() {
     const hunks = computeLineDiff(contentRef.current, revised)
     if (countChangedHunks(hunks) === 0) return // identical — nothing to show
     setDiffHunks(hunks)
+    // Store the revised blocks for when user accepts
+    const revisedBlocks = deserializeBlocks(revised)
+    pendingRevisionBlocksRef.current =
+      revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
   }, [])
 
   const handleAcceptHunk = useCallback((id: string) => {
@@ -258,19 +288,7 @@ export default function EditorPage() {
       <div className="flex flex-1 min-h-0">
         {/* Editor pane */}
         <div className="flex-1 min-w-0 overflow-hidden border-r border-gray-700">
-          <CodeMirror
-            value={content}
-            height="100%"
-            extensions={[markdown({ base: markdownLanguage, codeLanguages: languages })]}
-            theme={oneDark}
-            onChange={handleChange}
-            style={{ height: '100%', fontSize: '13px' }}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: false,
-              highlightActiveLine: true,
-            }}
-          />
+          <BlockEditor blocks={blocks} onChange={handleBlocks} />
         </div>
 
         {/* Preview pane — shows inline diff when reviewing AI changes */}
@@ -282,14 +300,14 @@ export default function EditorPage() {
               onDecline={handleDeclineHunk}
             />
           ) : (
-            <ResumePreview content={content} />
+            <BlockResumePreview blocks={blocks} />
           )}
         </div>
       </div>
 
       {showOptimize && (
         <OptimizeModal
-          resumeContent={content}
+          resumeContent={blocksToMarkdown(blocks)}
           onClose={() => setShowOptimize(false)}
           onRevision={handleRevision}
           initialJobDescription={prefillJob || undefined}
@@ -303,7 +321,7 @@ export default function EditorPage() {
         aria-hidden="true"
         style={{ position: 'absolute', left: '-9999px', top: 0, width: '750px', pointerEvents: 'none' }}
       >
-        <ResumePreview content={content} />
+        <BlockResumePreview blocks={blocks} />
       </div>
     </div>
   )
