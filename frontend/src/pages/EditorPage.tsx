@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { languages } from '@codemirror/language-data'
-import { oneDark } from '@codemirror/theme-one-dark'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
-import ResumePreview from '../components/ResumePreview'
+import ChatPanel from '../components/ChatPanel'
+import BlockEditor from '../components/BlockEditor'
+import BlockResumePreview from '../components/BlockResumePreview'
 import InlineDiffView from '../components/InlineDiffView'
-import { api } from '../api/client'
-import type { VersionMeta } from '../api/client'
+import { api, DEFAULT_MARGINS } from '../api/client'
+import type { ChatMessage, Margins, VersionMeta } from '../api/client'
 import {
   computeLineDiff,
   resolveHunks,
@@ -17,11 +15,20 @@ import {
   countPendingHunks,
 } from '../utils/diff'
 import type { DiffHunk, HunkStatus } from '../utils/diff'
+import {
+  blocksToMarkdown,
+  deserializeBlocks,
+  migrateMarkdownToBlocks,
+  serializeBlocks,
+} from '../utils/blocks'
+import type { ResumeBlock } from '../types/blocks'
 
 const AUTOSAVE_DELAY_MS = 800
+const MARGINS_STORAGE_KEY = 'cv_pilot_margins'
 
 export default function EditorPage() {
   const [content, setContent] = useState('')
+  const [blocks, setBlocks] = useState<ResumeBlock[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showOptimize, setShowOptimize] = useState(() => {
@@ -36,9 +43,23 @@ export default function EditorPage() {
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [diffHunks, setDiffHunks] = useState<DiffHunk[] | null>(null)
+  const [showChat, setShowChat] = useState(false)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [editorWidthPct, setEditorWidthPct] = useState(50)
+  const [chatHeight, setChatHeight] = useState(320)
+  const panesRef = useRef<HTMLDivElement>(null)
+  const [margins, setMargins] = useState<Margins>(() => {
+    try {
+      const stored = localStorage.getItem(MARGINS_STORAGE_KEY)
+      return stored ? (JSON.parse(stored) as Margins) : DEFAULT_MARGINS
+    } catch {
+      return DEFAULT_MARGINS
+    }
+  })
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
+  const pendingRevisionBlocksRef = useRef<ResumeBlock[] | null>(null)
 
   // Keep a ref in sync so async handlers always see the latest content
   useEffect(() => {
@@ -52,20 +73,31 @@ export default function EditorPage() {
       const resolved = resolveHunks(diffHunks)
       handleChange(resolved)
       setDiffHunks(null)
+      if (pendingRevisionBlocksRef.current) {
+        setBlocks(pendingRevisionBlocksRef.current)
+        pendingRevisionBlocksRef.current = null
+      }
     }
     // handleChange is stable, diffHunks identity changes only when we update it
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffHunks])
 
+  const initBlocks = (markdown: string) => {
+    const loaded = deserializeBlocks(markdown)
+    setBlocks(loaded.length > 0 ? loaded : migrateMarkdownToBlocks(markdown))
+  }
+
   useEffect(() => {
     Promise.all([api.getResume(), api.listVersions()])
       .then(([resume, vers]) => {
         setContent(resume.content)
+        initBlocks(resume.content)
         setVersions(vers)
         const active = vers.find((v) => v.is_active)
         if (active) setActiveVersionId(active.id)
       })
       .catch((e: unknown) => console.error('Failed to load resume:', e))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const flushSave = useCallback(async () => {
@@ -92,12 +124,20 @@ export default function EditorPage() {
     }, AUTOSAVE_DELAY_MS)
   }, [])
 
+  const handleBlocks = useCallback(
+    (newBlocks: ResumeBlock[]) => {
+      setBlocks(newBlocks)
+      handleChange(serializeBlocks(newBlocks))
+    },
+    [handleChange],
+  )
+
   const handleExportPdf = async () => {
     setExporting(true)
     try {
       const el = printRef.current
       if (!el) throw new Error('Print target not found')
-      const blob = await api.exportPdf(el.innerHTML)
+      const blob = await api.exportPdf(el.innerHTML, margins)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -117,10 +157,12 @@ export default function EditorPage() {
       await flushSave()
       const data = await api.loadVersion(id)
       setContent(data.content)
+      initBlocks(data.content)
       setActiveVersionId(id)
       const vers = await api.listVersions()
       setVersions(vers)
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeVersionId, flushSave],
   )
 
@@ -151,9 +193,11 @@ export default function EditorPage() {
     await api.deleteVersion(activeVersionId!)
     const [resume, vers] = await Promise.all([api.getResume(), api.listVersions()])
     setContent(resume.content)
+    initBlocks(resume.content)
     setVersions(vers)
     const newActive = vers.find((v) => v.is_active)
     if (newActive) setActiveVersionId(newActive.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [versions, activeVersionId])
 
   const handleExportMd = useCallback(() => {
@@ -171,7 +215,6 @@ export default function EditorPage() {
   const handleImportMd: React.ChangeEventHandler<HTMLInputElement> = useCallback(async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Reset input so the same file can be re-imported if needed
     e.target.value = ''
     const text = await file.text()
     const defaultName = file.name.replace(/\.md$/i, '')
@@ -179,17 +222,22 @@ export default function EditorPage() {
     if (!name?.trim()) return
     const meta = await api.createVersion(name.trim(), text)
     setContent(text)
+    initBlocks(text)
     setActiveVersionId(meta.id)
     const vers = await api.listVersions()
     setVersions(vers)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Inline diff handlers ─────────────────────────────────────────────────
 
   const handleRevision = useCallback((revised: string) => {
     const hunks = computeLineDiff(contentRef.current, revised)
-    if (countChangedHunks(hunks) === 0) return // identical — nothing to show
+    if (countChangedHunks(hunks) === 0) return
     setDiffHunks(hunks)
+    const revisedBlocks = deserializeBlocks(revised)
+    pendingRevisionBlocksRef.current =
+      revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
   }, [])
 
   const handleAcceptHunk = useCallback((id: string) => {
@@ -215,7 +263,6 @@ export default function EditorPage() {
         h.type === 'changed' ? { ...h, status: 'accepted' as HunkStatus } : h,
       )
     })
-    // useEffect will detect pendingCount === 0 and apply+exit
   }, [])
 
   const handleDeclineAll = useCallback(() => {
@@ -226,6 +273,31 @@ export default function EditorPage() {
       )
     })
   }, [])
+
+  const handleMarginsChange = useCallback((m: Margins) => {
+    setMargins(m)
+    localStorage.setItem(MARGINS_STORAGE_KEY, JSON.stringify(m))
+  }, [])
+
+  const pageBreakHeight = Math.round((11 - margins.top - margins.bottom) * 96)
+  const printableWidthPx = Math.round((8.5 - margins.left - margins.right) * 96)
+
+  const handleVerticalDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startPct = editorWidthPct
+    const containerWidth = panesRef.current?.getBoundingClientRect().width ?? 1
+    const onMove = (ev: MouseEvent) => {
+      const deltaPct = ((ev.clientX - startX) / containerWidth) * 100
+      setEditorWidthPct(Math.min(80, Math.max(20, startPct + deltaPct)))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   const diffControls: DiffControls | undefined = diffHunks
     ? {
@@ -252,73 +324,85 @@ export default function EditorPage() {
         onDeleteVersion={handleDeleteVersion}
         onExportMd={handleExportMd}
         onImportMd={handleImportMd}
+        margins={margins}
+        onMarginsChange={handleMarginsChange}
         diffControls={diffControls}
+        showChat={showChat}
+        onToggleChat={() => setShowChat((v) => !v)}
       />
 
-      <div className="flex flex-1 min-h-0">
-        {/* Editor pane */}
-        <div className="flex-1 min-w-0 overflow-hidden border-r border-gray-700">
-          <CodeMirror
-            value={content}
-            height="100%"
-            extensions={[markdown({ base: markdownLanguage, codeLanguages: languages })]}
-            theme={oneDark}
-            onChange={handleChange}
-            style={{ height: '100%', fontSize: '13px' }}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: false,
-              highlightActiveLine: true,
-            }}
+      <div className="flex flex-col flex-1 min-h-0">
+        <div ref={panesRef} className="flex flex-1 min-h-0">
+          {/* Block editor pane */}
+          <div className="min-w-0 overflow-auto bg-gray-900" style={{ width: `${editorWidthPct}%` }}>
+            <BlockEditor blocks={blocks} onChange={handleBlocks} />
+          </div>
+
+          {/* Vertical resize handle */}
+          <div
+            onMouseDown={handleVerticalDividerMouseDown}
+            className="w-1 shrink-0 cursor-col-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
           />
+
+          {/* Preview pane */}
+          <div className="min-w-0 overflow-auto bg-gray-100 p-6 flex-1">
+            {diffHunks ? (
+              <InlineDiffView
+                hunks={diffHunks}
+                onAccept={handleAcceptHunk}
+                onDecline={handleDeclineHunk}
+              />
+            ) : (
+              <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
+                <BlockResumePreview blocks={blocks} />
+                {[1, 2].map((n) => (
+                  <div
+                    key={n}
+                    className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
+                    style={{ top: `${n * pageBreakHeight}px` }}
+                  >
+                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                    <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
+                      Page {n + 1}
+                    </span>
+                    <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Preview pane — shows inline diff when reviewing AI changes */}
-        <div className="flex-1 min-w-0 overflow-auto bg-gray-100 p-6">
-          {diffHunks ? (
-            <InlineDiffView
-              hunks={diffHunks}
-              onAccept={handleAcceptHunk}
-              onDecline={handleDeclineHunk}
-            />
-          ) : (
-            <div className="relative max-w-[750px] mx-auto">
-              <ResumePreview content={content} />
-              {[1, 2].map((n) => (
-                <div
-                  key={n}
-                  className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
-                  style={{ top: `${n * 1056}px` }}
-                >
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                  <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
-                    Page {n + 1}
-                  </span>
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {showChat && (
+          <ChatPanel
+            messages={chatMessages}
+            onMessagesChange={setChatMessages}
+            resume={blocksToMarkdown(blocks)}
+            onRevision={handleRevision}
+            onClose={() => setShowChat(false)}
+            height={chatHeight}
+            onHeightChange={setChatHeight}
+          />
+        )}
       </div>
 
       {showOptimize && (
         <OptimizeModal
-          resumeContent={content}
+          resumeContent={blocksToMarkdown(blocks)}
           onClose={() => setShowOptimize(false)}
           onRevision={handleRevision}
           initialJobDescription={prefillJob || undefined}
         />
       )}
 
-      {/* Hidden print target — rendered off-screen so Playwright can capture exact preview HTML */}
+      {/* Hidden print target */}
       <div
         ref={printRef}
         id="resume-print-target"
         aria-hidden="true"
-        style={{ position: 'absolute', left: '-9999px', top: 0, width: '750px', pointerEvents: 'none' }}
+        style={{ position: 'absolute', left: '-9999px', top: 0, width: `${printableWidthPx}px`, pointerEvents: 'none' }}
       >
-        <ResumePreview content={content} />
+        <BlockResumePreview blocks={blocks} />
       </div>
     </div>
   )

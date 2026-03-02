@@ -12,6 +12,7 @@ interface Props {
 
 export default function OptimizeModal({ resumeContent, onClose, onRevision, initialJobDescription }: Props) {
   const [jobDescription, setJobDescription] = useState(initialJobDescription ?? '')
+  const [pageLimit, setPageLimit] = useState(1)
   const [loading, setLoading] = useState(false)
   const [charCount, setCharCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +33,7 @@ export default function OptimizeModal({ resumeContent, onClose, onRevision, init
           revisedRef.current += text
           setCharCount(revisedRef.current.length)
         }
-      })
+      }, pageLimit)
       if (!cancelledRef.current) {
         onRevision(revisedRef.current)
         onClose()
@@ -82,7 +83,27 @@ export default function OptimizeModal({ resumeContent, onClose, onRevision, init
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-400 shrink-0">Page limit</label>
+              <div className="flex rounded-lg overflow-hidden border border-gray-600">
+                {[1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setPageLimit(n)}
+                    disabled={loading}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+                      pageLimit === n
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={handleOptimize}
               disabled={loading || !jobDescription.trim()}
@@ -92,7 +113,7 @@ export default function OptimizeModal({ resumeContent, onClose, onRevision, init
             </button>
             {loading && (
               <span className="text-gray-500 text-xs">
-                Generating revised resume… ({charCount.toLocaleString()} chars)
+                Generating… ({charCount.toLocaleString()} chars)
               </span>
             )}
           </div>
