@@ -131,7 +131,7 @@ export default function ResumePreview({ content }: Props) {
 
           case 'summary':
             return (
-              <p className="text-[13px] text-gray-600 text-center italic mb-5 leading-relaxed border-b border-gray-200 pb-4">
+              <p className="text-[13px] text-gray-600 text-center italic mb-5 leading-relaxed">
                 {children}
               </p>
             )
