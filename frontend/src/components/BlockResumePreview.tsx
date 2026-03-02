@@ -270,6 +270,26 @@ export default function BlockResumePreview({ blocks }: BlockResumePreviewProps) 
           )
         }
 
+        if (block.type === 'summary') {
+          return (
+            <div key={block.id}>
+              <ReactMarkdown
+                remarkPlugins={bodyRemarkPlugins}
+                components={{
+                  ...bodyComponents,
+                  p: ({ children }) => (
+                    <p className="text-[13px] text-gray-600 text-center italic mb-5 leading-relaxed">
+                      {children}
+                    </p>
+                  ),
+                }}
+              >
+                {block.content}
+              </ReactMarkdown>
+            </div>
+          )
+        }
+
         return (
           <div key={block.id}>
             <div className="mt-5 mb-2 border-b border-gray-400 pb-px">
