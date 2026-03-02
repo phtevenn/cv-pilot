@@ -288,7 +288,7 @@ export default function EditorPage() {
                 <div
                   key={n}
                   className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
-                  style={{ top: `${n * 1056}px` }}
+                  style={{ top: `${n * 979}px` }}
                 >
                   <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
                   <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
