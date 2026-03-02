@@ -100,11 +100,12 @@ export const api = {
     resume: string,
     jobDescription: string,
     onChunk: (text: string) => void,
+    pageLimit: number = 1,
   ): Promise<void> => {
     const resp = await fetch(`${API_BASE}/api/llm/optimize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ resume, job_description: jobDescription }),
+      body: JSON.stringify({ resume, job_description: jobDescription, page_limit: pageLimit }),
     })
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Optimize request failed' }))
