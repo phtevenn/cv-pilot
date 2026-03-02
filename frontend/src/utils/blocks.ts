@@ -108,7 +108,8 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim()
     const m = SECTION_RE.exec(trimmed)
-    if (m) {
+    // Skip line 0 — the very first line is almost always the name, not a section
+    if (m && i > 0) {
       sections.push({ lineIndex: i, heading: (m[1] ?? m[2]).trim() })
     }
   }
@@ -187,7 +188,7 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
     const content = contentLines.join('\n').trim()
     const type = guessType(heading)
     // Use heading text as title, title-cased
-    const title = heading.charAt(0) + heading.slice(1).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+    const title = heading.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
 
     blocks.push({
       id: uid(),
