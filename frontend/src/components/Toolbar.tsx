@@ -1,6 +1,7 @@
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import VersionSelector from './VersionSelector'
-import type { VersionMeta } from '../api/client'
+import type { Margins, VersionMeta } from '../api/client'
 import { navigate } from '../utils/navigate'
 
 export interface DiffControls {
@@ -24,7 +25,62 @@ interface ToolbarProps {
   onDeleteVersion: () => void
   onExportMd: () => void
   onImportMd: React.ChangeEventHandler<HTMLInputElement>
+  margins: Margins
+  onMarginsChange: (m: Margins) => void
   diffControls?: DiffControls
+}
+
+function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: Margins) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const field = (label: string, key: keyof Margins) => (
+    <label key={key} className="flex flex-col gap-1">
+      <span className="text-gray-500 text-[10px] uppercase tracking-wide">{label}</span>
+      <input
+        type="number"
+        value={margins[key]}
+        onChange={(e) => onChange({ ...margins, [key]: parseFloat(e.target.value) || 0 })}
+        step={0.05}
+        min={0}
+        max={2}
+        className="w-16 bg-gray-700 text-gray-100 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      />
+    </label>
+  )
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+          open ? 'bg-gray-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+        }`}
+      >
+        Margins
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-xl p-4 z-20 shadow-xl">
+          <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-3">PDF Margins (inches)</p>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Top', 'top')}
+            {field('Bottom', 'bottom')}
+            {field('Left', 'left')}
+            {field('Right', 'right')}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function Toolbar({
@@ -41,6 +97,8 @@ export default function Toolbar({
   onDeleteVersion,
   onExportMd,
   onImportMd,
+  margins,
+  onMarginsChange,
   diffControls,
 }: ToolbarProps) {
   const { user, logout } = useAuth()
@@ -105,6 +163,8 @@ export default function Toolbar({
         >
           {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
+
+        <MarginPopover margins={margins} onChange={onMarginsChange} />
 
         <button
           onClick={onExportMd}

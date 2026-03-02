@@ -8,8 +8,8 @@ import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
 import ResumePreview from '../components/ResumePreview'
 import InlineDiffView from '../components/InlineDiffView'
-import { api } from '../api/client'
-import type { VersionMeta } from '../api/client'
+import { api, DEFAULT_MARGINS } from '../api/client'
+import type { Margins, VersionMeta } from '../api/client'
 import {
   computeLineDiff,
   resolveHunks,
@@ -19,6 +19,7 @@ import {
 import type { DiffHunk, HunkStatus } from '../utils/diff'
 
 const AUTOSAVE_DELAY_MS = 800
+const MARGINS_STORAGE_KEY = 'cv_pilot_margins'
 
 export default function EditorPage() {
   const [content, setContent] = useState('')
@@ -36,6 +37,14 @@ export default function EditorPage() {
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [diffHunks, setDiffHunks] = useState<DiffHunk[] | null>(null)
+  const [margins, setMargins] = useState<Margins>(() => {
+    try {
+      const stored = localStorage.getItem(MARGINS_STORAGE_KEY)
+      return stored ? (JSON.parse(stored) as Margins) : DEFAULT_MARGINS
+    } catch {
+      return DEFAULT_MARGINS
+    }
+  })
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const printRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef(content)
@@ -97,7 +106,7 @@ export default function EditorPage() {
     try {
       const el = printRef.current
       if (!el) throw new Error('Print target not found')
-      const blob = await api.exportPdf(el.innerHTML)
+      const blob = await api.exportPdf(el.innerHTML, margins)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -227,6 +236,13 @@ export default function EditorPage() {
     })
   }, [])
 
+  const handleMarginsChange = useCallback((m: Margins) => {
+    setMargins(m)
+    localStorage.setItem(MARGINS_STORAGE_KEY, JSON.stringify(m))
+  }, [])
+
+  const pageBreakHeight = Math.round((11 - margins.top - margins.bottom) * 96)
+
   const diffControls: DiffControls | undefined = diffHunks
     ? {
         pendingCount: countPendingHunks(diffHunks),
@@ -252,6 +268,8 @@ export default function EditorPage() {
         onDeleteVersion={handleDeleteVersion}
         onExportMd={handleExportMd}
         onImportMd={handleImportMd}
+        margins={margins}
+        onMarginsChange={handleMarginsChange}
         diffControls={diffControls}
       />
 
@@ -288,7 +306,7 @@ export default function EditorPage() {
                 <div
                   key={n}
                   className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
-                  style={{ top: `${n * 994}px` }}
+                  style={{ top: `${n * pageBreakHeight}px` }}
                 >
                   <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
                   <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
