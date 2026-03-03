@@ -1,10 +1,11 @@
 import json
 
+from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from config import ANTHROPIC_API_KEY
 from deps import get_current_user
+from llm_client import get_client
 
 router = APIRouter()
 
@@ -36,9 +37,6 @@ async def optimize(
     request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
-
     body = await request.json()
     resume: str = body.get("resume", "")
     job: str = body.get("job_description", "")
@@ -49,24 +47,37 @@ async def optimize(
         page_limit_plural="s" if page_limit > 1 else "",
     )
 
-    from anthropic import AsyncAnthropic
-
-    client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        client, model = get_client("optimize")
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
     async def event_stream():
-        async with client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": _USER_TEMPLATE.format(resume=resume, job=job),
-                }
-            ],
-        ) as stream:
-            async for text in stream.text_stream:
-                yield f"data: {json.dumps({'text': text})}\n\n"
+        if isinstance(client, AsyncAnthropic):
+            async with client.messages.stream(
+                model=model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": _USER_TEMPLATE.format(resume=resume, job=job)}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+        else:
+            # OpenAI-compatible (OpenRouter / Nvidia NIM)
+            stream = await client.chat.completions.create(
+                model=model,
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": _USER_TEMPLATE.format(resume=resume, job=job)},
+                ],
+                stream=True,
+            )
+            async for chunk in stream:
+                text = chunk.choices[0].delta.content or ""
+                if text:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
