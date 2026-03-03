@@ -6,8 +6,11 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from config import ANTHROPIC_API_KEY, JSEARCH_API_KEY, RAPIDAPI_HOST
+from anthropic import AsyncAnthropic
+
+from config import JSEARCH_API_KEY, RAPIDAPI_HOST
 from deps import get_current_user
+from llm_client import get_client
 import storage
 
 router = APIRouter()
@@ -96,15 +99,14 @@ async def _fetch_jobs(query: str, location: str, remote_only: bool) -> list[dict
 
 
 async def _rerank_with_claude(resume: str, jobs: list[dict]) -> list[dict]:
-    if not ANTHROPIC_API_KEY:
+    try:
+        client, model = get_client("score")
+    except ValueError:
         for i, j in enumerate(jobs):
             j["match_score"] = max(80 - i * 5, 10)
             j["match_reason"] = "Ranked by keyword overlap"
         return jobs
 
-    from anthropic import AsyncAnthropic
-
-    client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
     job_summaries = [
         {
             "id": j["id"],
@@ -122,12 +124,19 @@ async def _rerank_with_claude(resume: str, jobs: list[dict]) -> list[dict]:
         'Return a JSON array only, no other text:\n'
         '[{"id": "<job_id>", "score": <0-100>, "reason": "<one sentence>"}]'
     )
-    message = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = message.content[0].text if message.content else "[]"
+
+    if isinstance(client, AsyncAnthropic):
+        message = await client.messages.create(
+            model=model, max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = message.content[0].text if message.content else "[]"
+    else:
+        response = await client.chat.completions.create(
+            model=model, max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.choices[0].message.content or "[]"
     json_match = re.search(r"\[.*\]", text, re.DOTALL)
     if not json_match:
         return jobs

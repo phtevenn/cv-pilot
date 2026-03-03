@@ -15,6 +15,23 @@ BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 JSEARCH_API_KEY: str = os.getenv("JSEARCH_API_KEY", "")
 RAPIDAPI_HOST: str = "jsearch.p.rapidapi.com"
 
+# Per-task provider config
+SCORE_PROVIDER: str = os.getenv("SCORE_PROVIDER", "anthropic")
+SCORE_MODEL: str = os.getenv("SCORE_MODEL", "claude-haiku-4-5-20251001")
+
+CHAT_PROVIDER: str = os.getenv("CHAT_PROVIDER", "anthropic")
+CHAT_MODEL: str = os.getenv("CHAT_MODEL", "claude-sonnet-4-6")
+
+OPTIMIZE_PROVIDER: str = os.getenv("OPTIMIZE_PROVIDER", "anthropic")
+OPTIMIZE_MODEL: str = os.getenv("OPTIMIZE_MODEL", "claude-sonnet-4-6")
+
+# Alternative provider credentials
+OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
+NVIDIA_NIM_API_KEY: str = os.getenv("NVIDIA_NIM_API_KEY", "")
+NVIDIA_NIM_BASE_URL: str = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+
 DATA_DIR = Path(__file__).parent / "data"
 RESUMES_DIR = DATA_DIR / "resumes"
 
