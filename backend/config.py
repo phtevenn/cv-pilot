@@ -14,6 +14,8 @@ FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 JSEARCH_API_KEY: str = os.getenv("JSEARCH_API_KEY", "")
 RAPIDAPI_HOST: str = "jsearch.p.rapidapi.com"
+# Number of job recommendations returned (1–25; override via RECO_LIMIT env var)
+RECO_LIMIT: int = max(1, min(25, int(os.getenv("RECO_LIMIT", "10"))))
 
 # Per-task provider config
 SCORE_PROVIDER: str = os.getenv("SCORE_PROVIDER", "anthropic")
