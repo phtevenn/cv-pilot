@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_URL
-from routes import auth, jobs, llm, pdf, resume
+from routes import auth, chat, jobs, llm, pdf, resume
 
 app = FastAPI(title="CV Pilot API", version="0.1.0")
 
@@ -18,6 +18,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(resume.router, prefix="/api/resume", tags=["resume"])
 app.include_router(pdf.router, prefix="/api/export", tags=["export"])
 app.include_router(llm.router, prefix="/api/llm", tags=["llm"])
+app.include_router(chat.router, prefix="/api/llm", tags=["llm"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 
 

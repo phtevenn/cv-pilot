@@ -1,5 +1,10 @@
 import { diff_match_patch } from 'diff-match-patch'
 
+let _idCounter = 0
+function uid(): string {
+  return `hunk-${++_idCounter}`
+}
+
 export type HunkStatus = 'pending' | 'accepted' | 'declined'
 
 export interface DiffHunk {
@@ -40,7 +45,7 @@ export function computeLineDiff(original: string, revised: string): DiffHunk[] {
   const flushPending = () => {
     if (pendingOriginalText || pendingRevisedText) {
       hunks.push({
-        id: crypto.randomUUID(),
+        id: uid(),
         type: 'changed',
         text: '',
         originalText: pendingOriginalText,
@@ -57,7 +62,7 @@ export function computeLineDiff(original: string, revised: string): DiffHunk[] {
       // DIFF_EQUAL
       flushPending()
       hunks.push({
-        id: crypto.randomUUID(),
+        id: uid(),
         type: 'equal',
         text,
         originalText: '',
