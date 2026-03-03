@@ -1,9 +1,11 @@
 import React, { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { ResumeBlock } from '../types/blocks'
+import { blocksToMarkdown } from '../utils/blocks'
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers (copied from ResumePreview)
 // ---------------------------------------------------------------------------
 
 function getNodeText(node: any): string {
@@ -15,9 +17,8 @@ function getNodeText(node: any): string {
 }
 
 // ---------------------------------------------------------------------------
-// Remark plugin — annotates top-level paragraphs with data-resume-type
-// so custom renderers can style them correctly without needing counters in
-// React render (which breaks in Strict Mode).
+// Remark plugin — annotates top-level paragraphs for header blocks only
+// (name / contact / summary styling, same as ResumePreview)
 // ---------------------------------------------------------------------------
 
 function remarkResumeAnnotate() {
@@ -41,10 +42,8 @@ function remarkResumeAnnotate() {
           if (/^[A-Z][A-Z\s&/]+$/.test(text)) {
             type = 'section'
           } else if (text.length < 80) {
-            // Short bold line → job title / degree / project name
             type = 'jobtitle'
           }
-          // Long bold lines (e.g. publication citations) stay as 'text'
         } else {
           const hasStrong = children.some((c: any) => c.type === 'strong')
           const hasBullet = children.some(
@@ -53,7 +52,6 @@ function remarkResumeAnnotate() {
           if (hasStrong && hasBullet) {
             type = 'company'
           } else if (currentIdx === 2) {
-            // Third paragraph is typically the professional summary
             type = 'summary'
           }
         }
@@ -69,7 +67,7 @@ function remarkResumeAnnotate() {
 }
 
 // ---------------------------------------------------------------------------
-// CompanyLine — company name left, date range right
+// CompanyLine — company name left, date range right (copied from ResumePreview)
 // ---------------------------------------------------------------------------
 
 function CompanyLine({ children }: { children: React.ReactNode }) {
@@ -91,25 +89,20 @@ function CompanyLine({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Fallback — no bullet found
   return <p className="text-sm font-semibold mt-4 mb-0.5">{children}</p>
 }
 
 // ---------------------------------------------------------------------------
-// ResumePreview
+// BlockResumePreview
 // ---------------------------------------------------------------------------
 
-interface Props {
-  content: string
+interface BlockResumePreviewProps {
+  blocks: ResumeBlock[]
 }
 
-export default function ResumePreview({ content }: Props) {
-  const remarkPlugins = useMemo(
-    () => [remarkGfm, remarkResumeAnnotate] as any[],
-    [],
-  )
-
-  const components = useMemo(
+export default function BlockResumePreview({ blocks }: BlockResumePreviewProps) {
+  // Component map for header blocks — includes name/contact/summary styling
+  const headerComponents = useMemo(
     () => ({
       p({ children, node: _node, ...props }: any) {
         const type = (props['data-resume-type'] as string) ?? 'text'
@@ -198,11 +191,156 @@ export default function ResumePreview({ content }: Props) {
     [],
   )
 
+  // Component map for non-header blocks — simpler styling, no name/contact/summary annotations
+  const bodyComponents = useMemo(
+    () => ({
+      p({ children, node: _node, ...props }: any) {
+        const type = (props['data-resume-type'] as string) ?? 'text'
+
+        if (type === 'company') {
+          return <CompanyLine>{children}</CompanyLine>
+        }
+
+        return (
+          <p className="text-[13px] text-gray-700 mb-2 leading-relaxed">
+            {children}
+          </p>
+        )
+      },
+
+      ul({ children }: any) {
+        return (
+          <ul className="list-disc ml-5 mb-3 mt-1.5 space-y-0.5">{children}</ul>
+        )
+      },
+
+      li({ children }: any) {
+        return (
+          <li className="text-[13px] text-gray-700 leading-snug pl-0.5">
+            {children}
+          </li>
+        )
+      },
+
+      strong({ children }: any) {
+        return <strong className="font-semibold text-gray-900">{children}</strong>
+      },
+
+      a({ href, children }: any) {
+        return (
+          <a
+            href={href}
+            className="text-blue-600 hover:underline break-all"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {children}
+          </a>
+        )
+      },
+    }),
+    [],
+  )
+
+  // Remark plugins for header blocks (with annotation)
+  const headerRemarkPlugins = useMemo(
+    () => [remarkGfm, remarkResumeAnnotate] as any[],
+    [],
+  )
+
+  // Remark plugins for body blocks — need company-line detection
+  const bodyRemarkPlugins = useMemo(
+    () => [remarkGfm, remarkBodyAnnotate] as any[],
+    [],
+  )
+
   return (
     <div className="bg-white shadow-md px-8 py-6 font-sans">
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {content}
-      </ReactMarkdown>
+      {blocks.map((block) => {
+        if (block.type === 'header') {
+          return (
+            <div key={block.id}>
+              <ReactMarkdown
+                remarkPlugins={headerRemarkPlugins}
+                components={headerComponents}
+              >
+                {block.content}
+              </ReactMarkdown>
+            </div>
+          )
+        }
+
+        if (block.type === 'summary') {
+          return (
+            <div key={block.id}>
+              <ReactMarkdown
+                remarkPlugins={bodyRemarkPlugins}
+                components={{
+                  ...bodyComponents,
+                  p: ({ children }) => (
+                    <p className="text-[13px] text-gray-600 text-center italic mb-5 leading-relaxed">
+                      {children}
+                    </p>
+                  ),
+                }}
+              >
+                {block.content}
+              </ReactMarkdown>
+            </div>
+          )
+        }
+
+        return (
+          <div key={block.id}>
+            <div className="mt-5 mb-2 border-b border-gray-400 pb-px">
+              <span className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-gray-700">
+                {block.title}
+              </span>
+            </div>
+            <ReactMarkdown
+              remarkPlugins={bodyRemarkPlugins}
+              components={bodyComponents}
+            >
+              {block.content}
+            </ReactMarkdown>
+          </div>
+        )
+      })}
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Remark plugin for body blocks — annotates company-type paragraphs
+// ---------------------------------------------------------------------------
+
+function remarkBodyAnnotate() {
+  return (tree: any) => {
+    for (const node of tree.children as any[]) {
+      if (node.type !== 'paragraph') continue
+
+      const children: any[] = node.children
+      const hasStrong = children.some((c: any) => c.type === 'strong')
+      const hasBullet = children.some(
+        (c: any) => c.type === 'text' && (c.value as string)?.includes('•'),
+      )
+
+      let type = 'text'
+      if (hasStrong && hasBullet) {
+        type = 'company'
+      }
+
+      node.data = node.data ?? {}
+      node.data.hProperties = {
+        ...(node.data.hProperties ?? {}),
+        'data-resume-type': type,
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Re-export blocksToMarkdown for use by the hidden print target / AI
+// ---------------------------------------------------------------------------
+
+export { blocksToMarkdown as blocksToPreviewMarkdown }

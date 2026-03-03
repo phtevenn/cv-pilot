@@ -8,7 +8,7 @@ from deps import get_current_user
 
 router = APIRouter()
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_TEMPLATE = """\
 You are a professional resume optimizer. Given a resume in Markdown format and a job description, \
 rewrite the resume to better target the role.
 
@@ -17,7 +17,9 @@ CRITICAL RULES:
 - No commentary, no explanations, no preamble, no postamble.
 - Preserve the exact same Markdown structure and formatting conventions.
 - Strengthen bullet points with impact-driven language and relevant keywords from the job description.
-- Do not invent experience or credentials that are not in the original resume."""
+- Do not invent experience or credentials that are not in the original resume.
+- The revised resume MUST fit within {page_limit} page{page_limit_plural}. \
+Trim less-relevant bullet points, shorten descriptions, or consolidate sections as needed to stay within the limit."""
 
 _USER_TEMPLATE = """\
 ## Resume
@@ -40,6 +42,12 @@ async def optimize(
     body = await request.json()
     resume: str = body.get("resume", "")
     job: str = body.get("job_description", "")
+    page_limit: int = max(1, min(int(body.get("page_limit", 1)), 5))
+
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+        page_limit=page_limit,
+        page_limit_plural="s" if page_limit > 1 else "",
+    )
 
     from anthropic import AsyncAnthropic
 
@@ -49,7 +57,7 @@ async def optimize(
         async with client.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=4096,
-            system=_SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[
                 {
                     "role": "user",
