@@ -6,13 +6,13 @@ import type { DiffHunk } from '../utils/diff'
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  header: 'bg-purple-900 text-purple-200',
-  summary: 'bg-blue-900 text-blue-200',
-  experience: 'bg-green-900 text-green-200',
-  education: 'bg-yellow-900 text-yellow-200',
-  skills: 'bg-orange-900 text-orange-200',
-  projects: 'bg-pink-900 text-pink-200',
-  publications: 'bg-teal-900 text-teal-200',
+  header: 'bg-purple-900 text-purple-300',
+  summary: 'bg-blue-900 text-blue-300',
+  experience: 'bg-indigo-900 text-indigo-300',
+  education: 'bg-teal-900 text-teal-300',
+  skills: 'bg-green-900 text-green-300',
+  projects: 'bg-orange-900 text-orange-300',
+  publications: 'bg-amber-900 text-amber-300',
   custom: 'bg-gray-700 text-gray-300',
 }
 
@@ -210,13 +210,13 @@ function EntryCard({ entry, onAccept, onDecline }: EntryCardProps) {
       <div className="flex gap-2 px-3 py-2 bg-gray-800 border-t border-gray-700">
         <button
           onClick={onAccept}
-          className="flex-1 py-1.5 bg-green-700 hover:bg-green-600 text-white text-xs font-semibold rounded transition-colors"
+          className="flex-1 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
         >
           {acceptLabel}
         </button>
         <button
           onClick={onDecline}
-          className="flex-1 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
+          className="flex-1 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
         >
           {declineLabel}
         </button>
@@ -259,13 +259,13 @@ export default function BlockDiffView({
         <div className="flex gap-2">
           <button
             onClick={onAcceptAll}
-            className="px-2.5 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-semibold rounded transition-colors"
+            className="px-2.5 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
           >
             Accept All
           </button>
           <button
             onClick={onDeclineAll}
-            className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
+            className="px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
           >
             Decline All
           </button>

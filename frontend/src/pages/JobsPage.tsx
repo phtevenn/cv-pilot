@@ -178,7 +178,7 @@ export default function JobsPage() {
               onChange={(e) => setJobTitles(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Job title (e.g. Computational Biologist)"
-              className="flex-1 bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+              className="flex-1 bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none hover:border-gray-500 focus:border-indigo-500 transition-colors"
             />
             <input
               type="text"
@@ -186,7 +186,7 @@ export default function JobsPage() {
               onChange={(e) => setLocation(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Location (e.g. San Francisco, CA)"
-              className="flex-1 bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+              className="flex-1 bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none hover:border-gray-500 focus:border-indigo-500 transition-colors"
             />
           </div>
           <div className="flex items-center justify-between">

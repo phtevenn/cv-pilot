@@ -373,11 +373,11 @@ export default function EditorPage() {
                   className="absolute inset-x-0 flex items-center gap-2 z-10 pointer-events-none"
                   style={{ top: `${n * pageBreakHeight}px` }}
                 >
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
-                  <span className="shrink-0 bg-blue-50 text-blue-400 text-[10px] font-medium px-2 py-0.5 rounded-full border border-blue-200">
+                  <div className="flex-1 border-t border-dashed border-gray-400 opacity-50" />
+                  <span className="shrink-0 bg-gray-200 text-gray-500 text-[10px] font-medium px-2 py-0.5 rounded-full border border-gray-300">
                     Page {n + 1}
                   </span>
-                  <div className="flex-1 border-t-2 border-dashed border-blue-300 opacity-60" />
+                  <div className="flex-1 border-t border-dashed border-gray-400 opacity-50" />
                 </div>
               ))}
             </div>
