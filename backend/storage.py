@@ -226,6 +226,81 @@ def set_active_version(user_id: str, version_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Application tracker storage
+# ---------------------------------------------------------------------------
+
+
+def _applications_path(user_id: str) -> Path:
+    return _user_dir(user_id) / "applications.json"
+
+
+def _load_applications(user_id: str) -> list[dict]:
+    path = _applications_path(user_id)
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_applications(user_id: str, applications: list[dict]) -> None:
+    _applications_path(user_id).write_text(json.dumps(applications, indent=2), encoding="utf-8")
+
+
+def list_applications(user_id: str) -> list[dict]:
+    _user_dir(user_id)  # ensure dir exists
+    return _load_applications(user_id)
+
+
+def create_application(user_id: str, data: dict) -> dict:
+    applications = _load_applications(user_id)
+    now = _now()
+    app: dict = {
+        "id": str(uuid.uuid4()),
+        "job_title": data.get("job_title", ""),
+        "company": data.get("company", ""),
+        "location": data.get("location", ""),
+        "status": data.get("status", "applied"),
+        "version_id": data.get("version_id"),
+        "version_name": data.get("version_name"),
+        "job_url": data.get("job_url", ""),
+        "notes": data.get("notes", ""),
+        "applied_at": now,
+        "updated_at": now,
+    }
+    applications.append(app)
+    _save_applications(user_id, applications)
+    return app
+
+
+def get_application(user_id: str, app_id: str) -> Optional[dict]:
+    for app in _load_applications(user_id):
+        if app["id"] == app_id:
+            return app
+    return None
+
+
+def update_application(user_id: str, app_id: str, data: dict) -> Optional[dict]:
+    applications = _load_applications(user_id)
+    for app in applications:
+        if app["id"] == app_id:
+            for field in ("job_title", "company", "location", "status", "version_id", "version_name", "job_url", "notes"):
+                if field in data:
+                    app[field] = data[field]
+            app["updated_at"] = _now()
+            _save_applications(user_id, applications)
+            return app
+    return None
+
+
+def delete_application(user_id: str, app_id: str) -> bool:
+    applications = _load_applications(user_id)
+    new_list = [a for a in applications if a["id"] != app_id]
+    if len(new_list) == len(applications):
+        return False
+    _save_applications(user_id, new_list)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Backward-compat wrappers (used by existing GET/PUT /api/resume endpoints)
 # ---------------------------------------------------------------------------
 
