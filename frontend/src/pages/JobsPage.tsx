@@ -121,6 +121,7 @@ export default function JobsPage() {
   const [jobTitles, setJobTitles] = useState('')
   const [location, setLocation] = useState('')
   const [remoteOnly, setRemoteOnly] = useState(false)
+  const [limit, setLimit] = useState(10)
   const [jobs, setJobs] = useState<JobResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -136,6 +137,7 @@ export default function JobsPage() {
         job_titles: jobTitles,
         location,
         remote_only: remoteOnly,
+        limit,
       })
       setJobs(results)
     } catch (e) {
@@ -190,15 +192,29 @@ export default function JobsPage() {
             />
           </div>
           <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={remoteOnly}
-                onChange={(e) => setRemoteOnly(e.target.checked)}
-                className="accent-indigo-500 w-4 h-4"
-              />
-              <span className="text-gray-400 text-sm">Remote only</span>
-            </label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={remoteOnly}
+                  onChange={(e) => setRemoteOnly(e.target.checked)}
+                  className="accent-indigo-500 w-4 h-4"
+                />
+                <span className="text-gray-400 text-sm">Remote only</span>
+              </label>
+              <label className="flex items-center gap-2 select-none">
+                <span className="text-gray-400 text-sm">Results</span>
+                <select
+                  value={limit}
+                  onChange={(e) => setLimit(Number(e.target.value))}
+                  className="bg-gray-800 text-gray-100 border border-gray-600 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  {[5, 10, 15, 20, 25].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <button
               onClick={handleSearch}
               disabled={!jobTitles.trim() || loading}
