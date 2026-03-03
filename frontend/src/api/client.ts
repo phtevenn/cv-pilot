@@ -162,6 +162,7 @@ export const api = {
     job_titles: string
     location: string
     remote_only: boolean
+    limit?: number
   }) => request<JobResult[]>('/api/jobs/search', {
     method: 'POST',
     body: JSON.stringify(params),

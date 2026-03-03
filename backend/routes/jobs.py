@@ -4,11 +4,11 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from anthropic import AsyncAnthropic
 
-from config import JSEARCH_API_KEY, RAPIDAPI_HOST
+from config import JSEARCH_API_KEY, RAPIDAPI_HOST, RECO_LIMIT
 from deps import get_current_user
 from llm_client import get_client
 import storage
@@ -27,10 +27,15 @@ _STOPWORDS = {
 }
 
 
+_RECO_MAX: int = 25  # hard upper cap regardless of config or request
+
+
 class SearchRequest(BaseModel):
     job_titles: str
     location: str = ""
     remote_only: bool = False
+    # 0 means "use server default (RECO_LIMIT)"; 1–25 to request a specific count
+    limit: int = Field(default=0, ge=0, le=_RECO_MAX)
 
 
 def _extract_keywords(text: str) -> set[str]:
@@ -73,12 +78,12 @@ def _normalize_job(raw: dict) -> dict:
     }
 
 
-async def _fetch_jobs(query: str, location: str, remote_only: bool) -> list[dict]:
+async def _fetch_jobs(query: str, location: str, remote_only: bool, pages: int = 1) -> list[dict]:
     if not JSEARCH_API_KEY:
         raise HTTPException(status_code=503, detail="JSEARCH_API_KEY not configured")
     params: dict = {
         "query": f"{query} in {location}" if location else query,
-        "num_pages": "1",
+        "num_pages": str(max(1, min(pages, 5))),  # guard: 1–5 pages
         "date_posted": "month",
     }
     if remote_only:
@@ -161,7 +166,14 @@ async def search_jobs(
     resume = storage.load_resume(user_id)
     resume_keywords = _extract_keywords(resume)
 
-    raw_jobs = await _fetch_jobs(body.job_titles, body.location, body.remote_only)
+    # Resolve the result count: per-request limit takes precedence over server default
+    effective_limit = body.limit if 1 <= body.limit <= _RECO_MAX else RECO_LIMIT
+    # Fetch 2× as many candidates so reranking has room to surface better matches.
+    # Each JSearch page yields ~10 results; cap at 5 pages (≤50 raw results).
+    pool_size = min(effective_limit * 2, 50)
+    pages_needed = max(1, min((pool_size + 9) // 10, 5))
+
+    raw_jobs = await _fetch_jobs(body.job_titles, body.location, body.remote_only, pages=pages_needed)
     if not raw_jobs:
         return []
 
@@ -173,7 +185,7 @@ async def search_jobs(
         ),
         reverse=True,
     )
-    top15 = [_normalize_job(j) for j in scored_raw[:15]]
-    reranked = await _rerank_with_claude(resume, top15)
+    candidates = [_normalize_job(j) for j in scored_raw[:pool_size]]
+    reranked = await _rerank_with_claude(resume, candidates)
     reranked.sort(key=lambda j: j["match_score"], reverse=True)
-    return reranked[:10]
+    return reranked[:effective_limit]
