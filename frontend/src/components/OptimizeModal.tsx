@@ -79,7 +79,7 @@ export default function OptimizeModal({ resumeContent, onClose, onRevision, init
               placeholder="Paste the full job description here…"
               rows={8}
               disabled={loading}
-              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-xl p-3 text-sm resize-none focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-60"
+              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-600 rounded-xl p-3 text-sm resize-none focus:outline-none hover:border-gray-500 focus:border-indigo-500 transition-colors disabled:opacity-60"
             />
           </div>
 

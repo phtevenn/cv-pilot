@@ -112,7 +112,7 @@ export default function Toolbar({
   ) : saving ? (
     <span className="text-gray-500">Saving…</span>
   ) : (
-    <span className="text-gray-600">Saved</span>
+    <span className="text-gray-500">Saved</span>
   )
 
   return (
@@ -174,7 +174,7 @@ export default function Toolbar({
         <button
           onClick={onExportPdf}
           disabled={exporting}
-          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
         >
           {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
