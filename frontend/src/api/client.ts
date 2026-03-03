@@ -37,6 +37,44 @@ export interface VersionMeta {
   is_active: boolean
 }
 
+export type ApplicationStatus = 'applied' | 'interview' | 'offer' | 'rejected' | 'withdrawn'
+
+export interface Application {
+  id: string
+  job_title: string
+  company: string
+  location: string
+  status: ApplicationStatus
+  version_id: string | null
+  version_name: string | null
+  job_url: string
+  notes: string
+  applied_at: string
+  updated_at: string
+}
+
+export interface ApplicationCreate {
+  job_title: string
+  company: string
+  location?: string
+  status?: ApplicationStatus
+  version_id?: string | null
+  version_name?: string | null
+  job_url?: string
+  notes?: string
+}
+
+export interface ApplicationUpdate {
+  job_title?: string
+  company?: string
+  location?: string
+  status?: ApplicationStatus
+  version_id?: string | null
+  version_name?: string | null
+  job_url?: string
+  notes?: string
+}
+
 function getToken(): string | null {
   return localStorage.getItem('cv_pilot_token')
 }
@@ -100,6 +138,25 @@ export const api = {
     if (!resp.ok) throw new Error('PDF export failed')
     return resp.blob()
   },
+
+  listApplications: () => request<Application[]>('/api/applications'),
+
+  createApplication: (body: ApplicationCreate) =>
+    request<Application>('/api/applications', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getApplication: (id: string) => request<Application>(`/api/applications/${id}`),
+
+  updateApplication: (id: string, body: ApplicationUpdate) =>
+    request<Application>(`/api/applications/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteApplication: (id: string) =>
+    request<{ ok: boolean }>(`/api/applications/${id}`, { method: 'DELETE' }),
 
   searchJobs: (params: {
     job_titles: string

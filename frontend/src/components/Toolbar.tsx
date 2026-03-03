@@ -205,6 +205,13 @@ export default function Toolbar({
           Find Jobs
         </button>
 
+        <button
+          onClick={() => navigate('/applications')}
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Applications
+        </button>
+
         {user && (
           <div className="flex items-center gap-2 ml-1 pl-3 border-l border-gray-700">
             {user.picture && (
