@@ -6,13 +6,13 @@ import type { DiffHunk } from '../utils/diff'
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  header: 'bg-purple-900 text-purple-200',
-  summary: 'bg-blue-900 text-blue-200',
-  experience: 'bg-green-900 text-green-200',
-  education: 'bg-yellow-900 text-yellow-200',
-  skills: 'bg-orange-900 text-orange-200',
-  projects: 'bg-pink-900 text-pink-200',
-  publications: 'bg-teal-900 text-teal-200',
+  header: 'bg-purple-900 text-purple-300',
+  summary: 'bg-blue-900 text-blue-300',
+  experience: 'bg-indigo-900 text-indigo-300',
+  education: 'bg-teal-900 text-teal-300',
+  skills: 'bg-green-900 text-green-300',
+  projects: 'bg-orange-900 text-orange-300',
+  publications: 'bg-amber-900 text-amber-300',
   custom: 'bg-gray-700 text-gray-300',
 }
 
