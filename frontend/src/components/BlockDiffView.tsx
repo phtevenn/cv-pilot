@@ -210,13 +210,13 @@ function EntryCard({ entry, onAccept, onDecline }: EntryCardProps) {
       <div className="flex gap-2 px-3 py-2 bg-gray-800 border-t border-gray-700">
         <button
           onClick={onAccept}
-          className="flex-1 py-1.5 bg-green-700 hover:bg-green-600 text-white text-xs font-semibold rounded transition-colors"
+          className="flex-1 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
         >
           {acceptLabel}
         </button>
         <button
           onClick={onDecline}
-          className="flex-1 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
+          className="flex-1 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
         >
           {declineLabel}
         </button>
@@ -259,13 +259,13 @@ export default function BlockDiffView({
         <div className="flex gap-2">
           <button
             onClick={onAcceptAll}
-            className="px-2.5 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-semibold rounded transition-colors"
+            className="px-2.5 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
           >
             Accept All
           </button>
           <button
             onClick={onDeclineAll}
-            className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
+            className="px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
           >
             Decline All
           </button>
