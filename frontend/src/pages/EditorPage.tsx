@@ -40,6 +40,14 @@ export default function EditorPage() {
     if (prefill) sessionStorage.removeItem('cv_pilot_prefill_job')
     return prefill
   })
+  const [jobContext, setJobContext] = useState<{
+    title: string
+    company: string
+    location: string
+    apply_url: string
+  } | null>(null)
+  const [applySuccess, setApplySuccess] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
@@ -101,6 +109,17 @@ export default function EditorPage() {
       })
       .catch((e: unknown) => console.error('Failed to load resume:', e))
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem('cv_pilot_job_context')
+    if (raw) {
+      try {
+        setJobContext(JSON.parse(raw))
+      } catch {
+        // ignore
+      }
+    }
   }, [])
 
   const flushSave = useCallback(async () => {
@@ -283,6 +302,35 @@ export default function EditorPage() {
     localStorage.setItem(MARGINS_STORAGE_KEY, JSON.stringify(m))
   }, [])
 
+  const handleMarkApplied = async () => {
+    if (!jobContext || applying) return
+    setApplying(true)
+    try {
+      const activeVersion = versions.find((v) => v.is_active) ?? null
+      await api.createApplication({
+        job_title: jobContext.title,
+        company: jobContext.company,
+        location: jobContext.location || '',
+        status: 'applied',
+        version_id: activeVersion?.id ?? null,
+        version_name: activeVersion?.name ?? null,
+        job_url: jobContext.apply_url || '',
+        notes: '',
+      })
+      setApplySuccess(true)
+      sessionStorage.removeItem('cv_pilot_job_context')
+      sessionStorage.removeItem('cv_pilot_prefill_job')
+      setTimeout(() => {
+        setJobContext(null)
+        setApplySuccess(false)
+      }, 3000)
+    } catch (e) {
+      console.error('Failed to track application', e)
+    } finally {
+      setApplying(false)
+    }
+  }
+
   const pageBreakHeight = Math.round((11 - margins.top - margins.bottom) * 96)
   const printableWidthPx = Math.round((8.5 - margins.left - margins.right) * 96)
 
@@ -337,6 +385,43 @@ export default function EditorPage() {
         showChat={showChat}
         onToggleChat={() => setShowChat((v) => !v)}
       />
+
+      {jobContext && (
+        <div className="bg-indigo-950/60 border-b border-indigo-800/50 px-4 py-2 flex items-center justify-between gap-4 shrink-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-indigo-300 font-medium">Targeting:</span>
+            <span className="text-white">{jobContext.title}</span>
+            <span className="text-indigo-400">at {jobContext.company}</span>
+            {jobContext.location && (
+              <span className="text-gray-400 text-xs">· {jobContext.location}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {applySuccess ? (
+              <span className="text-green-400 text-xs font-medium">✓ Application tracked!</span>
+            ) : (
+              <button
+                onClick={handleMarkApplied}
+                disabled={applying}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                {applying ? 'Tracking…' : 'Mark as Applied'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('cv_pilot_job_context')
+                sessionStorage.removeItem('cv_pilot_prefill_job')
+                setJobContext(null)
+              }}
+              className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col flex-1 min-h-0">
         <div ref={panesRef} className="flex flex-1 min-h-0">
