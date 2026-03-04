@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { Application, ApplicationCreate, ApplicationStatus, ApplicationUpdate, VersionMeta } from '../api/client'
-import { navigate } from '../utils/navigate'
+import { NavBar } from '../components/NavBar'
 
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
   applied: 'Applied',
@@ -392,19 +392,7 @@ export default function ApplicationsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-white font-semibold text-sm tracking-tight">CV Pilot</span>
-          <span className="text-gray-600 text-xs">/ Applications</span>
-        </div>
-        <button
-          onClick={() => navigate('/')}
-          className="text-gray-400 hover:text-gray-200 text-xs transition-colors"
-        >
-          ← Back to Editor
-        </button>
-      </header>
+      <NavBar currentPath="/applications" />
 
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-8 flex flex-col gap-6">
         {/* Title row */}

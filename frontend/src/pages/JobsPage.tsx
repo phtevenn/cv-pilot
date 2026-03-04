@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
 import type { JobResult } from '../api/client'
 import { navigate } from '../utils/navigate'
+import { NavBar } from '../components/NavBar'
 
 const CACHE_KEY = 'cv_pilot_jobs_cache'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -303,19 +304,7 @@ export default function JobsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-white font-semibold text-sm tracking-tight">CV Pilot</span>
-          <span className="text-gray-600 text-xs">/ Find Jobs</span>
-        </div>
-        <button
-          onClick={() => navigate('/')}
-          className="text-gray-400 hover:text-gray-200 text-xs transition-colors"
-        >
-          ← Back to Editor
-        </button>
-      </header>
+      <NavBar currentPath="/jobs" />
 
       {/* Main content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-8 flex flex-col gap-6">
