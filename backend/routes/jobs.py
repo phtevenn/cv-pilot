@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,7 +31,7 @@ _RECO_MAX: int = 25  # hard upper cap regardless of config or request
 
 
 class SearchRequest(BaseModel):
-    job_titles: str
+    job_titles: List[str]
     location: str = ""
     remote_only: bool = False
     # 0 means "use server default (RECO_LIMIT)"; 1–25 to request a specific count
@@ -173,7 +173,11 @@ async def search_jobs(
     pool_size = min(effective_limit * 2, 50)
     pages_needed = max(1, min((pool_size + 9) // 10, 5))
 
-    raw_jobs = await _fetch_jobs(body.job_titles, body.location, body.remote_only, pages=pages_needed)
+    if len(body.job_titles) > 1:
+        query = f"({' OR '.join(body.job_titles)})"
+    else:
+        query = body.job_titles[0] if body.job_titles else ""
+    raw_jobs = await _fetch_jobs(query, body.location, body.remote_only, pages=pages_needed)
     if not raw_jobs:
         return []
 
