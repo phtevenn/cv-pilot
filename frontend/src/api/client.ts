@@ -159,7 +159,7 @@ export const api = {
     request<{ ok: boolean }>(`/api/applications/${id}`, { method: 'DELETE' }),
 
   searchJobs: (params: {
-    job_titles: string
+    job_titles: string[]
     location: string
     remote_only: boolean
     limit?: number
