@@ -87,31 +87,31 @@ class TestFormatSalary:
 
 class TestSearchRequestValidation:
     def test_default_limit_is_zero(self):
-        req = SearchRequest(job_titles="software engineer")
+        req = SearchRequest(job_titles=["software engineer"])
         assert req.limit == 0
 
     def test_limit_zero_accepted(self):
-        req = SearchRequest(job_titles="engineer", limit=0)
+        req = SearchRequest(job_titles=["engineer"], limit=0)
         assert req.limit == 0
 
     def test_limit_one_accepted(self):
-        req = SearchRequest(job_titles="engineer", limit=1)
+        req = SearchRequest(job_titles=["engineer"], limit=1)
         assert req.limit == 1
 
     def test_limit_max_boundary(self):
-        req = SearchRequest(job_titles="engineer", limit=_RECO_MAX)
+        req = SearchRequest(job_titles=["engineer"], limit=_RECO_MAX)
         assert req.limit == _RECO_MAX
 
     def test_limit_exceeds_max_raises(self):
         with pytest.raises(ValidationError):
-            SearchRequest(job_titles="engineer", limit=_RECO_MAX + 1)
+            SearchRequest(job_titles=["engineer"], limit=_RECO_MAX + 1)
 
     def test_negative_limit_raises(self):
         with pytest.raises(ValidationError):
-            SearchRequest(job_titles="engineer", limit=-1)
+            SearchRequest(job_titles=["engineer"], limit=-1)
 
     def test_defaults(self):
-        req = SearchRequest(job_titles="data scientist")
+        req = SearchRequest(job_titles=["data scientist"])
         assert req.location == ""
         assert req.remote_only is False
         assert req.limit == 0
