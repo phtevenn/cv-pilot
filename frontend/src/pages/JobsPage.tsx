@@ -53,10 +53,41 @@ function formatTimeAgo(iso: string): string {
 
 function JobCard({ job }: { job: JobResult }) {
   const [expanded, setExpanded] = useState(false)
+  const [tracked, setTracked] = useState(false)
+  const [tracking, setTracking] = useState(false)
 
   const handleOptimize = () => {
     sessionStorage.setItem('cv_pilot_prefill_job', job.description)
+    sessionStorage.setItem('cv_pilot_job_context', JSON.stringify({
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      apply_url: job.apply_url,
+    }))
     navigate('/')
+  }
+
+  const handleTrack = async () => {
+    if (tracked || tracking) return
+    setTracking(true)
+    try {
+      await api.createApplication({
+        job_title: job.title,
+        company: job.company,
+        location: job.location || '',
+        status: 'applied',
+        version_id: null,
+        version_name: null,
+        job_url: job.apply_url || '',
+        notes: '',
+      })
+      setTracked(true)
+    } catch (e) {
+      console.error('Failed to track application', e)
+      alert('Failed to track application. Please try again.')
+    } finally {
+      setTracking(false)
+    }
   }
 
   return (
@@ -115,6 +146,17 @@ function JobCard({ job }: { job: JobResult }) {
             Apply ↗
           </a>
         )}
+        <button
+          onClick={handleTrack}
+          disabled={tracked || tracking}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            tracked
+              ? 'bg-green-900/60 text-green-300 cursor-default'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+          }`}
+        >
+          {tracked ? '✓ Tracked' : tracking ? 'Tracking…' : 'Track'}
+        </button>
         <button
           onClick={handleOptimize}
           className="ml-auto px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
