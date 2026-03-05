@@ -5,10 +5,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi import _rate_limit_exceeded_handler
 
 from config import FRONTEND_URL
+from database import create_db_and_tables
 from rate_limit import limiter
 from routes import applications, auth, chat, jobs, llm, pdf, resume
 
 app = FastAPI(title="CV Pilot API", version="0.1.0")
+create_db_and_tables()
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

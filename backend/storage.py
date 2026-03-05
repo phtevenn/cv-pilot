@@ -1,10 +1,10 @@
-import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
-from config import RESUMES_DIR
+from sqlmodel import Session, select
+
+from database import Application, ResumeVersion, UserMeta, get_engine
 
 SAMPLE_RESUME = """\
 **STEPHEN YU**
@@ -86,92 +86,110 @@ Austin RJ, Lemon BD, Aaron WH, et al. TriTACs, a novel class of T-cell-engaging 
 DEFAULT_VERSION_NAME = "Base"
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _user_dir(user_id: str) -> Path:
-    d = RESUMES_DIR / user_id
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _manifest_path(user_id: str) -> Path:
-    return _user_dir(user_id) / "manifest.json"
-
-
-def _version_path(user_id: str, version_id: str) -> Path:
-    return _user_dir(user_id) / f"{version_id}.md"
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _load_manifest(user_id: str) -> dict:
-    path = _manifest_path(user_id)
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {"active_version_id": None, "versions": []}
-
-
-def _save_manifest(user_id: str, manifest: dict) -> None:
-    _manifest_path(user_id).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-
-def _create_version_internal(user_id: str, name: str, content: str) -> dict:
-    manifest = _load_manifest(user_id)
-    vid = str(uuid.uuid4())
-    now = _now()
-    meta: dict = {"id": vid, "name": name, "created_at": now, "updated_at": now}
-    manifest["versions"].append(meta)
-    if manifest["active_version_id"] is None:
-        manifest["active_version_id"] = vid
-    _save_manifest(user_id, manifest)
-    _version_path(user_id, vid).write_text(content, encoding="utf-8")
-    return meta
-
-
-def _migrate_legacy(user_id: str) -> None:
-    """Migrate old flat {user_id}.md file to the versioned directory layout."""
-    legacy = RESUMES_DIR / f"{user_id}.md"
-    if legacy.exists() and not _manifest_path(user_id).exists():
-        content = legacy.read_text(encoding="utf-8")
-        _create_version_internal(user_id, DEFAULT_VERSION_NAME, content)
-        legacy.unlink()
+def _version_to_meta(v: ResumeVersion, active_id: Optional[str]) -> dict:
+    return {
+        "id": v.id,
+        "name": v.name,
+        "created_at": v.created_at,
+        "updated_at": v.updated_at,
+        "is_active": v.id == active_id,
+    }
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public API — same signatures as the old file-based storage
 # ---------------------------------------------------------------------------
 
 
 def init_user(user_id: str) -> None:
     """Ensure a user has at least one version, seeding with the sample if new."""
-    _migrate_legacy(user_id)
-    manifest = _load_manifest(user_id)
-    if not manifest["versions"]:
-        _create_version_internal(user_id, DEFAULT_VERSION_NAME, SAMPLE_RESUME)
+    with Session(get_engine()) as session:
+        meta = session.get(UserMeta, user_id)
+        if meta is None:
+            # Brand-new user — create sample version
+            now = _now()
+            vid = str(uuid.uuid4())
+            version = ResumeVersion(
+                id=vid,
+                user_id=user_id,
+                name=DEFAULT_VERSION_NAME,
+                content=SAMPLE_RESUME,
+                created_at=now,
+                updated_at=now,
+            )
+            meta = UserMeta(user_id=user_id, active_version_id=vid)
+            session.add(version)
+            session.add(meta)
+            session.commit()
+        elif meta.active_version_id is None:
+            # Has meta but no active version — check if versions exist
+            stmt = select(ResumeVersion).where(ResumeVersion.user_id == user_id).limit(1)
+            first = session.exec(stmt).first()
+            if first is None:
+                now = _now()
+                vid = str(uuid.uuid4())
+                version = ResumeVersion(
+                    id=vid,
+                    user_id=user_id,
+                    name=DEFAULT_VERSION_NAME,
+                    content=SAMPLE_RESUME,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(version)
+                meta.active_version_id = vid
+                session.add(meta)
+                session.commit()
+            else:
+                meta.active_version_id = first.id
+                session.add(meta)
+                session.commit()
 
 
 def list_versions(user_id: str) -> list[dict]:
     init_user(user_id)
-    manifest = _load_manifest(user_id)
-    active_id = manifest["active_version_id"]
-    return [{**v, "is_active": v["id"] == active_id} for v in manifest["versions"]]
+    with Session(get_engine()) as session:
+        meta = session.get(UserMeta, user_id)
+        active_id = meta.active_version_id if meta else None
+        stmt = select(ResumeVersion).where(ResumeVersion.user_id == user_id)
+        versions = session.exec(stmt).all()
+        return [_version_to_meta(v, active_id) for v in versions]
 
 
 def create_version(user_id: str, name: str, content: str) -> dict:
     init_user(user_id)
-    return _create_version_internal(user_id, name, content)
+    now = _now()
+    vid = str(uuid.uuid4())
+    with Session(get_engine()) as session:
+        version = ResumeVersion(
+            id=vid,
+            user_id=user_id,
+            name=name,
+            content=content,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(version)
+        session.commit()
+        session.refresh(version)
+        meta = session.get(UserMeta, user_id)
+        active_id = meta.active_version_id if meta else None
+        return _version_to_meta(version, active_id)
 
 
 def load_version(user_id: str, version_id: str) -> Optional[str]:
-    path = _version_path(user_id, version_id)
-    if not path.exists():
-        return None
-    return path.read_text(encoding="utf-8")
+    with Session(get_engine()) as session:
+        stmt = (
+            select(ResumeVersion)
+            .where(ResumeVersion.user_id == user_id)
+            .where(ResumeVersion.id == version_id)
+        )
+        version = session.exec(stmt).first()
+        return version.content if version else None
 
 
 def save_version(
@@ -181,48 +199,74 @@ def save_version(
     new_name: Optional[str] = None,
 ) -> Optional[dict]:
     """Update content and/or name of a version. Returns updated metadata or None if not found."""
-    manifest = _load_manifest(user_id)
-    for v in manifest["versions"]:
-        if v["id"] == version_id:
-            v["updated_at"] = _now()
-            if new_name is not None:
-                v["name"] = new_name
-            _save_manifest(user_id, manifest)
-            if content is not None:
-                _version_path(user_id, version_id).write_text(content, encoding="utf-8")
-            return dict(v)
-    return None
+    with Session(get_engine()) as session:
+        stmt = (
+            select(ResumeVersion)
+            .where(ResumeVersion.user_id == user_id)
+            .where(ResumeVersion.id == version_id)
+        )
+        version = session.exec(stmt).first()
+        if version is None:
+            return None
+        version.updated_at = _now()
+        if new_name is not None:
+            version.name = new_name
+        if content is not None:
+            version.content = content
+        session.add(version)
+        session.commit()
+        session.refresh(version)
+        meta = session.get(UserMeta, user_id)
+        active_id = meta.active_version_id if meta else None
+        return _version_to_meta(version, active_id)
 
 
 def delete_version(user_id: str, version_id: str) -> bool:
     """Delete a version. Returns False (and does nothing) if it's the last one."""
-    manifest = _load_manifest(user_id)
-    versions = manifest["versions"]
-    if len(versions) <= 1:
-        return False
-    manifest["versions"] = [v for v in versions if v["id"] != version_id]
-    if manifest["active_version_id"] == version_id:
-        manifest["active_version_id"] = manifest["versions"][0]["id"]
-    _save_manifest(user_id, manifest)
-    path = _version_path(user_id, version_id)
-    if path.exists():
-        path.unlink()
-    return True
+    with Session(get_engine()) as session:
+        stmt = select(ResumeVersion).where(ResumeVersion.user_id == user_id)
+        versions = session.exec(stmt).all()
+        if len(versions) <= 1:
+            return False
+        version = next((v for v in versions if v.id == version_id), None)
+        if version is None:
+            return False
+        session.delete(version)
+        # Update active_version_id if needed
+        meta = session.get(UserMeta, user_id)
+        if meta and meta.active_version_id == version_id:
+            remaining = [v for v in versions if v.id != version_id]
+            meta.active_version_id = remaining[0].id if remaining else None
+            session.add(meta)
+        session.commit()
+        return True
 
 
 def get_active_version_id(user_id: str) -> Optional[str]:
     init_user(user_id)
-    return _load_manifest(user_id)["active_version_id"]
+    with Session(get_engine()) as session:
+        meta = session.get(UserMeta, user_id)
+        return meta.active_version_id if meta else None
 
 
 def set_active_version(user_id: str, version_id: str) -> bool:
-    manifest = _load_manifest(user_id)
-    ids = {v["id"] for v in manifest["versions"]}
-    if version_id not in ids:
-        return False
-    manifest["active_version_id"] = version_id
-    _save_manifest(user_id, manifest)
-    return True
+    with Session(get_engine()) as session:
+        stmt = (
+            select(ResumeVersion)
+            .where(ResumeVersion.user_id == user_id)
+            .where(ResumeVersion.id == version_id)
+        )
+        exists = session.exec(stmt).first()
+        if not exists:
+            return False
+        meta = session.get(UserMeta, user_id)
+        if meta is None:
+            meta = UserMeta(user_id=user_id, active_version_id=version_id)
+        else:
+            meta.active_version_id = version_id
+        session.add(meta)
+        session.commit()
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -230,74 +274,79 @@ def set_active_version(user_id: str, version_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _applications_path(user_id: str) -> Path:
-    return _user_dir(user_id) / "applications.json"
-
-
-def _load_applications(user_id: str) -> list[dict]:
-    path = _applications_path(user_id)
-    if not path.exists():
-        return []
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _save_applications(user_id: str, applications: list[dict]) -> None:
-    _applications_path(user_id).write_text(json.dumps(applications, indent=2), encoding="utf-8")
-
-
 def list_applications(user_id: str) -> list[dict]:
-    _user_dir(user_id)  # ensure dir exists
-    return _load_applications(user_id)
+    with Session(get_engine()) as session:
+        stmt = select(Application).where(Application.user_id == user_id)
+        return [a.model_dump() for a in session.exec(stmt).all()]
 
 
 def create_application(user_id: str, data: dict) -> dict:
-    applications = _load_applications(user_id)
     now = _now()
-    app: dict = {
-        "id": str(uuid.uuid4()),
-        "job_title": data.get("job_title", ""),
-        "company": data.get("company", ""),
-        "location": data.get("location", ""),
-        "status": data.get("status", "applied"),
-        "version_id": data.get("version_id"),
-        "version_name": data.get("version_name"),
-        "job_url": data.get("job_url", ""),
-        "notes": data.get("notes", ""),
-        "applied_at": now,
-        "updated_at": now,
-    }
-    applications.append(app)
-    _save_applications(user_id, applications)
-    return app
+    app = Application(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        job_title=data.get("job_title", ""),
+        company=data.get("company", ""),
+        location=data.get("location", ""),
+        status=data.get("status", "applied"),
+        version_id=data.get("version_id"),
+        version_name=data.get("version_name"),
+        job_url=data.get("job_url", ""),
+        notes=data.get("notes", ""),
+        applied_at=now,
+        updated_at=now,
+    )
+    with Session(get_engine()) as session:
+        session.add(app)
+        session.commit()
+        session.refresh(app)
+        return app.model_dump()
 
 
 def get_application(user_id: str, app_id: str) -> Optional[dict]:
-    for app in _load_applications(user_id):
-        if app["id"] == app_id:
-            return app
-    return None
+    with Session(get_engine()) as session:
+        stmt = (
+            select(Application)
+            .where(Application.user_id == user_id)
+            .where(Application.id == app_id)
+        )
+        app = session.exec(stmt).first()
+        return app.model_dump() if app else None
 
 
 def update_application(user_id: str, app_id: str, data: dict) -> Optional[dict]:
-    applications = _load_applications(user_id)
-    for app in applications:
-        if app["id"] == app_id:
-            for field in ("job_title", "company", "location", "status", "version_id", "version_name", "job_url", "notes"):
-                if field in data:
-                    app[field] = data[field]
-            app["updated_at"] = _now()
-            _save_applications(user_id, applications)
-            return app
-    return None
+    with Session(get_engine()) as session:
+        stmt = (
+            select(Application)
+            .where(Application.user_id == user_id)
+            .where(Application.id == app_id)
+        )
+        app = session.exec(stmt).first()
+        if app is None:
+            return None
+        for field in ("job_title", "company", "location", "status", "version_id", "version_name", "job_url", "notes"):
+            if field in data:
+                setattr(app, field, data[field])
+        app.updated_at = _now()
+        session.add(app)
+        session.commit()
+        session.refresh(app)
+        return app.model_dump()
 
 
 def delete_application(user_id: str, app_id: str) -> bool:
-    applications = _load_applications(user_id)
-    new_list = [a for a in applications if a["id"] != app_id]
-    if len(new_list) == len(applications):
-        return False
-    _save_applications(user_id, new_list)
-    return True
+    with Session(get_engine()) as session:
+        stmt = (
+            select(Application)
+            .where(Application.user_id == user_id)
+            .where(Application.id == app_id)
+        )
+        app = session.exec(stmt).first()
+        if app is None:
+            return False
+        session.delete(app)
+        session.commit()
+        return True
 
 
 # ---------------------------------------------------------------------------
