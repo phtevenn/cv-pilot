@@ -20,6 +20,7 @@ import {
   blocksToMarkdown,
   deserializeBlocks,
   migrateMarkdownToBlocks,
+  parsePatchBlocks,
   serializeBlocks,
 } from '../utils/blocks'
 import type { ResumeBlock } from '../types/blocks'
@@ -263,7 +264,7 @@ export default function EditorPage() {
   }, [])
 
   const handlePatch = useCallback((patchMarkdown: string) => {
-    const patchBlocks = migrateMarkdownToBlocks(patchMarkdown)
+    const patchBlocks = parsePatchBlocks(patchMarkdown)
     const revisedBlocks = applyPatch(blocksRef.current, patchBlocks)
     const entries = computeBlockDiff(blocksRef.current, revisedBlocks)
     if (countBlockDiffTotal(entries) === 0) return
