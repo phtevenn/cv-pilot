@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from deps import get_current_user
 from llm_client import get_client
+from rate_limit import limiter
 
 router = APIRouter()
 
@@ -91,6 +92,7 @@ Keep the patch minimal — only include sections that actually change."""
 
 
 @router.post("/chat")
+@limiter.limit("30/hour")
 async def chat(
     request: Request,
     user: dict = Depends(get_current_user),

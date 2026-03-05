@@ -3,7 +3,7 @@ import re
 from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from anthropic import AsyncAnthropic
@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic
 from config import JSEARCH_API_KEY, RAPIDAPI_HOST, RECO_LIMIT
 from deps import get_current_user
 from llm_client import get_client
+from rate_limit import limiter
 import storage
 
 router = APIRouter()
@@ -213,7 +214,9 @@ async def _rerank_with_claude(resume: str, jobs: list[dict]) -> list[dict]:
 
 
 @router.post("/search")
+@limiter.limit("20/hour")
 async def search_jobs(
+    request: Request,
     body: SearchRequest,
     user: dict = Depends(get_current_user),
 ) -> list[dict]:

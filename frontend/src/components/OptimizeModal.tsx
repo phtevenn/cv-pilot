@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { api, ScoreResult } from '../api/client'
+import { toast } from 'sonner'
+import { api, ScoreResult, RateLimitError } from '../api/client'
 
 interface Props {
   resumeContent: string
@@ -107,7 +108,11 @@ export default function OptimizeModal({ resumeContent, onClose, onRevision, init
       }
     } catch (e) {
       if (!cancelledRef.current) {
-        setError(e instanceof Error ? e.message : 'Optimization failed')
+        if (e instanceof RateLimitError) {
+          toast.error(e.message)
+        } else {
+          setError(e instanceof Error ? e.message : 'Optimization failed')
+        }
       }
     } finally {
       setLoading(false)
