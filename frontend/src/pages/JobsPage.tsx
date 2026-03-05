@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { api, RateLimitError } from '../api/client'
 import type { JobResult } from '../api/client'
 import { navigate } from '../utils/navigate'
-import { NavBar } from '../components/NavBar'
+import { AppNav } from '../components/AppNav'
 
 const CACHE_KEY = 'cv_pilot_jobs_cache'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -350,7 +350,7 @@ export default function JobsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
-      <NavBar currentPath="/jobs" />
+      <AppNav currentPath="/jobs" />
 
       {/* Main content */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-8 flex flex-col gap-6">

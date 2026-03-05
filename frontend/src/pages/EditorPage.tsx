@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { AppNav } from '../components/AppNav'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
@@ -65,6 +66,7 @@ export default function EditorPage() {
   const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
   const [diffApplied, setDiffApplied] = useState(false)
   const [showChat, setShowChat] = useState(false)
+  const [mobilePane, setMobilePane] = useState<'editor' | 'preview'>('editor')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [editorWidthPct, setEditorWidthPct] = useState(50)
   const [chatHeight, setChatHeight] = useState(320)
@@ -477,6 +479,7 @@ export default function EditorPage() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-950">
+      <AppNav currentPath="/" />
       <Toolbar
         saving={saving}
         onOptimize={() => setShowOptimize(true)}
@@ -543,9 +546,38 @@ export default function EditorPage() {
       )}
 
       <div className="flex flex-col flex-1 min-h-0">
+        {/* Mobile tab switcher */}
+        <div className="sm:hidden flex border-b border-gray-800 shrink-0 bg-gray-900">
+          <button
+            onClick={() => setMobilePane('editor')}
+            className={`flex-1 py-2 text-xs font-medium transition-colors ${
+              mobilePane === 'editor'
+                ? 'text-white border-b-2 border-indigo-500'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            Editor
+          </button>
+          <button
+            onClick={() => setMobilePane('preview')}
+            className={`flex-1 py-2 text-xs font-medium transition-colors ${
+              mobilePane === 'preview'
+                ? 'text-white border-b-2 border-indigo-500'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            Preview
+          </button>
+        </div>
+
         <div ref={panesRef} className="flex flex-1 min-h-0">
           {/* Block editor / diff pane */}
-          <div className="min-w-0 overflow-hidden bg-gray-900 flex flex-col" style={{ width: `${editorWidthPct}%` }}>
+          <div
+            className={`min-w-0 overflow-hidden bg-gray-900 flex flex-col ${
+              mobilePane === 'preview' ? 'hidden sm:flex' : 'flex'
+            }`}
+            style={{ width: `${editorWidthPct}%` }}
+          >
             {blockDiff ? (
               <BlockDiffView
                 entries={blockDiff}
@@ -563,14 +595,18 @@ export default function EditorPage() {
             )}
           </div>
 
-          {/* Vertical resize handle */}
+          {/* Vertical resize handle — desktop only */}
           <div
             onMouseDown={handleVerticalDividerMouseDown}
-            className="w-1 shrink-0 cursor-col-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
+            className="hidden sm:block w-1 shrink-0 cursor-col-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
           />
 
-          {/* Preview pane — always shows the live resume */}
-          <div className="min-w-0 overflow-auto bg-gray-100 p-6 flex-1">
+          {/* Preview pane */}
+          <div
+            className={`min-w-0 overflow-auto bg-gray-100 p-6 flex-1 ${
+              mobilePane === 'editor' ? 'hidden sm:block' : 'block'
+            }`}
+          >
             <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
               <BlockResumePreview blocks={previewBlocks} />
               {[1, 2].map((n) => (

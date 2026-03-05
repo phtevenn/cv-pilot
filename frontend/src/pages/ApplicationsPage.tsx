@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { Application, ApplicationCreate, ApplicationStatus, ApplicationUpdate, VersionMeta } from '../api/client'
-import { NavBar } from '../components/NavBar'
+import { AppNav } from '../components/AppNav'
 
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
   applied: 'Applied',
@@ -396,7 +396,7 @@ export default function ApplicationsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
-      <NavBar currentPath="/applications" />
+      <AppNav currentPath="/applications" />
 
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-8 flex flex-col gap-6">
         {/* Title row */}

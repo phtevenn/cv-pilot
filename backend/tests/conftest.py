@@ -6,17 +6,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import SQLModel, create_engine
 
 import auth_utils
-import storage
+import database
 from main import app
 
 
 @pytest.fixture()
 def tmp_storage(tmp_path, monkeypatch):
-    """Redirect all storage I/O to a fresh temporary directory."""
-    monkeypatch.setattr(storage, "RESUMES_DIR", tmp_path)
-    return tmp_path
+    """Redirect all DB I/O to a fresh SQLite database in a temp directory."""
+    db_path = tmp_path / "test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(database, "_engine", engine)
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture()

@@ -84,15 +84,6 @@ def test_delete_active_version_reassigns_active(tmp_storage):
     assert storage.get_active_version_id("user1") == first_id
 
 
-def test_legacy_migration(tmp_storage):
-    """A plain {user_id}.md file is migrated into the versioned layout."""
-    legacy_file = tmp_storage / "migrated-user.md"
-    legacy_file.write_text("# Old resume content")
-    storage.init_user("migrated-user")
-    assert not legacy_file.exists()
-    assert storage.load_resume("migrated-user") == "# Old resume content"
-
-
 def test_active_version_content_via_load_resume(tmp_storage):
     storage.init_user("user1")
     meta = storage.create_version("user1", "v2", "v2 resume")

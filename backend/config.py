@@ -10,8 +10,11 @@ GOOGLE_CLIENT_ID: str = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
-FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
-BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+# Leave empty to derive redirect URLs from the incoming request (works for any
+# hostname including tailnet). Set explicitly only when the frontend and backend
+# are on different origins (e.g. local dev: frontend=:5173, backend=:8000).
+FRONTEND_URL: str = os.getenv("FRONTEND_URL", "")
+BACKEND_URL: str = os.getenv("BACKEND_URL", "")
 JSEARCH_API_KEY: str = os.getenv("JSEARCH_API_KEY", "")
 RAPIDAPI_HOST: str = "jsearch.p.rapidapi.com"
 # Number of job recommendations returned (1–25; override via RECO_LIMIT env var)

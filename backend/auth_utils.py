@@ -5,7 +5,6 @@ import httpx
 from jose import jwt
 
 from config import (
-    BACKEND_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     SECRET_KEY,
@@ -20,10 +19,10 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_SCOPES = ["openid", "email", "profile"]
 
 
-def get_google_auth_url(state: str) -> str:
+def get_google_auth_url(state: str, redirect_uri: str) -> str:
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": f"{BACKEND_URL}/api/auth/callback",
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": " ".join(GOOGLE_SCOPES),
         "state": state,
@@ -33,7 +32,7 @@ def get_google_auth_url(state: str) -> str:
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
 
-async def exchange_code_for_tokens(code: str) -> dict:
+async def exchange_code_for_tokens(code: str, redirect_uri: str) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             GOOGLE_TOKEN_URL,
@@ -41,7 +40,7 @@ async def exchange_code_for_tokens(code: str) -> dict:
                 "code": code,
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": f"{BACKEND_URL}/api/auth/callback",
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },
         )
