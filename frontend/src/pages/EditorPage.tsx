@@ -54,6 +54,7 @@ export default function EditorPage() {
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
+  const [diffApplied, setDiffApplied] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [editorWidthPct, setEditorWidthPct] = useState(50)
@@ -81,18 +82,18 @@ export default function EditorPage() {
     blocksRef.current = blocks
   }, [blocks])
 
-  // Auto-apply when all block diff entries have been accepted or declined
+  // When all block diff entries are accepted or declined: apply changes and show summary
   useEffect(() => {
-    if (!blockDiff) return
+    if (!blockDiff || diffApplied) return
     if (countBlockDiffPending(blockDiff) === 0) {
       const finalBlocks = resolveBlockDiff(blockDiff)
       setBlocks(finalBlocks)
       handleChange(serializeBlocks(finalBlocks))
-      setBlockDiff(null)
+      setDiffApplied(true)
     }
     // handleChange is stable; blockDiff identity changes only when we update it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockDiff])
+  }, [blockDiff, diffApplied])
 
   const initBlocks = (markdown: string) => {
     const loaded = deserializeBlocks(markdown)
@@ -255,21 +256,31 @@ export default function EditorPage() {
 
   // ── Block diff handlers ───────────────────────────────────────────────────
 
+  const openDiff = useCallback((entries: BlockDiffEntry[]) => {
+    setDiffApplied(false)
+    setBlockDiff(entries)
+  }, [])
+
+  const closeDiff = useCallback(() => {
+    setBlockDiff(null)
+    setDiffApplied(false)
+  }, [])
+
   const handleRevision = useCallback((revised: string) => {
     const revisedBlocks = deserializeBlocks(revised)
     const normalised = revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
     const entries = computeBlockDiff(blocksRef.current, normalised)
     if (countBlockDiffTotal(entries) === 0) return
-    setBlockDiff(entries)
-  }, [])
+    openDiff(entries)
+  }, [openDiff])
 
   const handlePatch = useCallback((patchMarkdown: string) => {
     const patchBlocks = parsePatchBlocks(patchMarkdown)
     const revisedBlocks = applyPatch(blocksRef.current, patchBlocks)
     const entries = computeBlockDiff(blocksRef.current, revisedBlocks)
     if (countBlockDiffTotal(entries) === 0) return
-    setBlockDiff(entries)
-  }, [])
+    openDiff(entries)
+  }, [openDiff])
 
   const handleAcceptBlock = useCallback((id: string) => {
     setBlockDiff((prev) =>
@@ -361,7 +372,7 @@ export default function EditorPage() {
     document.addEventListener('mouseup', onUp)
   }
 
-  const diffControls: DiffControls | undefined = blockDiff
+  const diffControls: DiffControls | undefined = blockDiff && !diffApplied
     ? {
         pendingCount: countBlockDiffPending(blockDiff),
         totalCount: countBlockDiffTotal(blockDiff),
@@ -444,6 +455,8 @@ export default function EditorPage() {
                 onDecline={handleDeclineBlock}
                 onAcceptAll={handleAcceptAll}
                 onDeclineAll={handleDeclineAll}
+                isApplied={diffApplied}
+                onClose={closeDiff}
               />
             ) : (
               <div className="overflow-auto flex-1">
