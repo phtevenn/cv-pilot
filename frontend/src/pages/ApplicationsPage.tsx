@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { Application, ApplicationCreate, ApplicationStatus, ApplicationUpdate, VersionMeta } from '../api/client'
 import { NavBar } from '../components/NavBar'
@@ -348,6 +349,7 @@ export default function ApplicationsPage() {
   }, [])
 
   const handleSaved = (app: Application) => {
+    const isNew = !applications.find((a) => a.id === app.id)
     setApplications((prev) => {
       const idx = prev.findIndex((a) => a.id === app.id)
       if (idx >= 0) {
@@ -359,14 +361,16 @@ export default function ApplicationsPage() {
     })
     setModalOpen(false)
     setEditTarget(null)
+    toast.success(isNew ? 'Application added.' : 'Application updated.')
   }
 
   const handleDelete = async (id: string) => {
     try {
       await api.deleteApplication(id)
       setApplications((prev) => prev.filter((a) => a.id !== id))
+      toast.success('Application deleted.')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete')
+      toast.error(e instanceof Error ? e.message : 'Failed to delete application.')
     }
   }
 
