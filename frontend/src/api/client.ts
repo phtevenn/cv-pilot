@@ -53,6 +53,12 @@ export interface VersionMeta {
   is_active: boolean
 }
 
+export interface ResumeMeta {
+  id: string
+  name: string
+  is_active: boolean
+}
+
 export type ApplicationStatus = 'applied' | 'interview' | 'offer' | 'rejected' | 'withdrawn'
 
 export interface Application {
@@ -147,6 +153,26 @@ export const api = {
     request<{ ok: boolean }>('/api/resume', {
       method: 'PUT',
       body: JSON.stringify({ content }),
+    }),
+
+  listResumes: () => request<ResumeMeta[]>('/api/resume/resumes'),
+
+  createResume: (name: string) =>
+    request<ResumeMeta>('/api/resume/resumes', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  cloneResume: (resumeId: string, name: string) =>
+    request<ResumeMeta>(`/api/resume/resumes/${resumeId}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  setActiveResume: (resumeId: string) =>
+    request<{ ok: boolean }>('/api/resume/resumes/active', {
+      method: 'PUT',
+      body: JSON.stringify({ resume_id: resumeId }),
     }),
 
   listVersions: () => request<VersionMeta[]>('/api/resume/versions'),

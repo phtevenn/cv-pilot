@@ -28,6 +28,59 @@ class VersionUpdate(BaseModel):
     name: Optional[str] = None
 
 
+class ResumeDocCreate(BaseModel):
+    name: str
+
+
+class ResumeDocClone(BaseModel):
+    name: str
+
+
+class SetActiveResume(BaseModel):
+    resume_id: str
+
+
+# ---------------------------------------------------------------------------
+# Resume-level endpoints (named resume docs)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/resumes")
+async def list_resumes(user: dict = Depends(get_current_user)) -> list:
+    return storage.list_resumes(user["sub"])
+
+
+@router.post("/resumes")
+async def create_resume(
+    body: ResumeDocCreate,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    return storage.create_resume(user["sub"], body.name.strip())
+
+
+@router.post("/resumes/{resume_id}/clone")
+async def clone_resume(
+    resume_id: str,
+    body: ResumeDocClone,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    result = storage.clone_resume(user["sub"], resume_id, body.name.strip())
+    if result is None:
+        raise HTTPException(status_code=404, detail="Source resume not found")
+    return result
+
+
+@router.put("/resumes/active")
+async def set_active_resume(
+    body: SetActiveResume,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    ok = storage.set_active_resume(user["sub"], body.resume_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Legacy endpoints — operate on the active version
 # ---------------------------------------------------------------------------

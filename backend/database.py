@@ -18,8 +18,33 @@ def get_engine():
     return _engine
 
 
+def _run_migrations(engine) -> None:
+    """Apply incremental schema migrations for columns added after initial release."""
+    from sqlalchemy import inspect, text
+
+    with engine.connect() as conn:
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
+
+        # Add resume_id to resume_versions if missing
+        if "resume_versions" in existing_tables:
+            cols = {c["name"] for c in inspector.get_columns("resume_versions")}
+            if "resume_id" not in cols:
+                conn.execute(text("ALTER TABLE resume_versions ADD COLUMN resume_id TEXT"))
+
+        # Add active_resume_id to user_meta if missing
+        if "user_meta" in existing_tables:
+            cols = {c["name"] for c in inspector.get_columns("user_meta")}
+            if "active_resume_id" not in cols:
+                conn.execute(text("ALTER TABLE user_meta ADD COLUMN active_resume_id TEXT"))
+
+        conn.commit()
+
+
 def create_db_and_tables() -> None:
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    _run_migrations(engine)
 
 
 def get_session():
@@ -32,11 +57,22 @@ def get_session():
 # ---------------------------------------------------------------------------
 
 
+class ResumeDoc(SQLModel, table=True):
+    """A named resume container that groups multiple versions together."""
+
+    __tablename__ = "resume_docs"
+
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    name: str
+
+
 class ResumeVersion(SQLModel, table=True):
     __tablename__ = "resume_versions"
 
     id: str = Field(primary_key=True)
     user_id: str = Field(index=True)
+    resume_id: Optional[str] = Field(default=None, index=True)
     name: str
     content: str = Field(default="")
     created_at: str
@@ -48,6 +84,7 @@ class UserMeta(SQLModel, table=True):
 
     user_id: str = Field(primary_key=True)
     active_version_id: Optional[str] = Field(default=None)
+    active_resume_id: Optional[str] = Field(default=None)
 
 
 class Application(SQLModel, table=True):

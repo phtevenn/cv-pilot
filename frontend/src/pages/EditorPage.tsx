@@ -8,7 +8,7 @@ import BlockEditor from '../components/BlockEditor'
 import BlockResumePreview from '../components/BlockResumePreview'
 import BlockDiffView from '../components/BlockDiffView'
 import { api, DEFAULT_MARGINS } from '../api/client'
-import type { ChatMessage, Margins, VersionMeta } from '../api/client'
+import type { ChatMessage, Margins, ResumeMeta, VersionMeta } from '../api/client'
 import {
   computeBlockDiff,
   resolveBlockDiff,
@@ -54,6 +54,8 @@ export default function EditorPage() {
   const [importingPdf, setImportingPdf] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
+  const [resumes, setResumes] = useState<ResumeMeta[]>([])
+  const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
   const [diffApplied, setDiffApplied] = useState(false)
   const [showChat, setShowChat] = useState(false)
@@ -102,13 +104,16 @@ export default function EditorPage() {
   }
 
   useEffect(() => {
-    Promise.all([api.getResume(), api.listVersions()])
-      .then(([resume, vers]) => {
+    Promise.all([api.getResume(), api.listVersions(), api.listResumes()])
+      .then(([resume, vers, resumeList]) => {
         setContent(resume.content)
         initBlocks(resume.content)
         setVersions(vers)
         const active = vers.find((v) => v.is_active)
         if (active) setActiveVersionId(active.id)
+        setResumes(resumeList)
+        const activeResume = resumeList.find((r) => r.is_active)
+        if (activeResume) setActiveResumeId(activeResume.id)
         setBlocksLoaded(true)
       })
       .catch((e: unknown) => console.error('Failed to load resume:', e))
@@ -226,6 +231,46 @@ export default function EditorPage() {
     if (newActive) setActiveVersionId(newActive.id)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [versions, activeVersionId])
+
+  const handleSwitchResume = useCallback(
+    async (resumeId: string) => {
+      if (resumeId === activeResumeId) return
+      await flushSave()
+      await api.setActiveResume(resumeId)
+      const [resumeData, vers, resumeList] = await Promise.all([
+        api.getResume(),
+        api.listVersions(),
+        api.listResumes(),
+      ])
+      setContent(resumeData.content)
+      initBlocks(resumeData.content)
+      setVersions(vers)
+      const active = vers.find((v) => v.is_active)
+      if (active) setActiveVersionId(active.id)
+      setResumes(resumeList)
+      setActiveResumeId(resumeId)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeResumeId, flushSave],
+  )
+
+  const handleNewResume = useCallback(async () => {
+    const name = window.prompt('Resume name:')
+    if (!name?.trim()) return
+    const newResume = await api.createResume(name.trim())
+    await handleSwitchResume(newResume.id)
+  }, [handleSwitchResume])
+
+  const handleCloneResume = useCallback(async () => {
+    if (!activeResumeId) return
+    const currentResume = resumes.find((r) => r.id === activeResumeId)
+    const defaultName = currentResume ? `${currentResume.name} (copy)` : 'Copy'
+    const name = window.prompt('Name for cloned resume:', defaultName)
+    if (!name?.trim()) return
+    await flushSave()
+    const cloned = await api.cloneResume(activeResumeId, name.trim())
+    await handleSwitchResume(cloned.id)
+  }, [activeResumeId, resumes, flushSave, handleSwitchResume])
 
   const handleExportMd = useCallback(() => {
     const active = versions.find((v) => v.id === activeVersionId)
@@ -431,6 +476,11 @@ export default function EditorPage() {
         diffControls={diffControls}
         showChat={showChat}
         onToggleChat={() => setShowChat((v) => !v)}
+        resumes={resumes}
+        activeResumeId={activeResumeId}
+        onSwitchResume={handleSwitchResume}
+        onNewResume={handleNewResume}
+        onCloneResume={handleCloneResume}
       />
 
       {jobContext && (

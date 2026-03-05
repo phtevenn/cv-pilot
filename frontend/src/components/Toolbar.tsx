@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import VersionSelector from './VersionSelector'
-import type { Margins, VersionMeta } from '../api/client'
+import type { Margins, ResumeMeta, VersionMeta } from '../api/client'
 import { navigate } from '../utils/navigate'
 
 const NAV_PAGES = [
@@ -64,6 +64,92 @@ function NavDropdown() {
   )
 }
 
+interface ResumeSelectorProps {
+  resumes: ResumeMeta[]
+  activeResumeId: string | null
+  onSwitch: (id: string) => void
+  onNew: () => void
+  onClone: () => void
+}
+
+function ResumeSelector({ resumes, activeResumeId, onSwitch, onNew, onClone }: ResumeSelectorProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open])
+
+  const activeResume = resumes.find((r) => r.id === activeResumeId)
+  const label = activeResume?.name ?? 'Resume'
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-sm text-gray-200 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-800"
+        title="Switch resume"
+      >
+        <span className="max-w-[120px] truncate">{label}</span>
+        <span className="text-gray-400 text-xs">▾</span>
+      </button>
+
+      {open && (
+        <div className="absolute top-full mt-1 left-0 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 min-w-48">
+          {resumes.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => {
+                setOpen(false)
+                onSwitch(r.id)
+              }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-700 rounded-md transition-colors ${
+                r.id === activeResumeId ? 'text-indigo-400 font-medium' : 'text-gray-200'
+              }`}
+            >
+              {r.name}
+            </button>
+          ))}
+          <div className="border-t border-gray-700 mt-1 pt-1">
+            <button
+              onClick={() => {
+                setOpen(false)
+                onNew()
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-md transition-colors"
+            >
+              + New Resume
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false)
+                onClone()
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-md transition-colors"
+            >
+              Clone Current
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export interface DiffControls {
   pendingCount: number
   totalCount: number
@@ -91,6 +177,11 @@ interface ToolbarProps {
   diffControls?: DiffControls
   showChat: boolean
   onToggleChat: () => void
+  resumes: ResumeMeta[]
+  activeResumeId: string | null
+  onSwitchResume: (id: string) => void
+  onNewResume: () => void
+  onCloneResume: () => void
 }
 
 function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: Margins) => void }) {
@@ -166,6 +257,11 @@ export default function Toolbar({
   diffControls,
   showChat,
   onToggleChat,
+  resumes,
+  activeResumeId,
+  onSwitchResume,
+  onNewResume,
+  onCloneResume,
 }: ToolbarProps) {
   const { user, logout } = useAuth()
 
@@ -180,6 +276,13 @@ export default function Toolbar({
       <div className="flex items-center gap-3">
         <span className="text-white font-semibold text-sm tracking-tight">CV Pilot</span>
         <NavDropdown />
+        <ResumeSelector
+          resumes={resumes}
+          activeResumeId={activeResumeId}
+          onSwitch={onSwitchResume}
+          onNew={onNewResume}
+          onClone={onCloneResume}
+        />
         <VersionSelector
           versions={versions}
           activeVersionId={activeVersionId}
