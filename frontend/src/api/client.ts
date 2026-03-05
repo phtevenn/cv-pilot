@@ -91,6 +91,15 @@ export interface ApplicationUpdate {
   notes?: string
 }
 
+export class RateLimitError extends Error {
+  retryAfter: number | null
+  constructor(message: string, retryAfter: number | null = null) {
+    super(message)
+    this.name = 'RateLimitError'
+    this.retryAfter = retryAfter
+  }
+}
+
 function getToken(): string | null {
   return localStorage.getItem('cv_pilot_token')
 }
@@ -98,6 +107,13 @@ function getToken(): string | null {
 function authHeaders(): Record<string, string> {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function parseRetryAfter(resp: Response): number | null {
+  const header = resp.headers.get('Retry-After')
+  if (!header) return null
+  const seconds = parseInt(header, 10)
+  return isNaN(seconds) ? null : seconds
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -109,6 +125,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...(init.headers as Record<string, string> | undefined),
     },
   })
+  if (resp.status === 429) {
+    const retryAfter = parseRetryAfter(resp)
+    const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+    const msg = minutes
+      ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+      : 'Rate limit reached. Please try again later.'
+    throw new RateLimitError(msg, retryAfter)
+  }
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }))
     throw new Error((err as { detail?: string }).detail ?? 'Request failed')
@@ -194,6 +218,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ resume, messages }),
     })
+    if (resp.status === 429) {
+      const retryAfter = parseRetryAfter(resp)
+      const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+      const msg = minutes
+        ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+        : 'Rate limit reached. Please try again later.'
+      throw new RateLimitError(msg, retryAfter)
+    }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Chat request failed' }))
       throw new Error((err as { detail?: string }).detail ?? 'Chat request failed')
@@ -237,6 +269,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ resume, job_description: jobDescription, page_limit: pageLimit }),
     })
+    if (resp.status === 429) {
+      const retryAfter = parseRetryAfter(resp)
+      const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+      const msg = minutes
+        ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+        : 'Rate limit reached. Please try again later.'
+      throw new RateLimitError(msg, retryAfter)
+    }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Optimize request failed' }))
       throw new Error((err as { detail?: string }).detail ?? 'Optimize request failed')

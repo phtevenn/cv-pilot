@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api } from '../api/client'
+import { toast } from 'sonner'
+import { api, RateLimitError } from '../api/client'
 import type { ChatMessage } from '../api/client'
 
 // Matches a full ```markdown``` code block (full revision)
@@ -143,8 +144,12 @@ export default function ChatPanel({
       })
       onMessagesChange([...nextMessages, { role: 'assistant', content: accumulated }])
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : 'Something went wrong'
-      onMessagesChange([...nextMessages, { role: 'assistant', content: `Error: ${errMsg}` }])
+      if (e instanceof RateLimitError) {
+        toast.error(e.message)
+      } else {
+        const errMsg = e instanceof Error ? e.message : 'Something went wrong'
+        onMessagesChange([...nextMessages, { role: 'assistant', content: `Error: ${errMsg}` }])
+      }
     } finally {
       setStreaming(false)
       setStreamingText('')

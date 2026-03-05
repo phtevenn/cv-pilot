@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
-import { api } from '../api/client'
+import { api, RateLimitError } from '../api/client'
 import type { JobResult } from '../api/client'
 import { navigate } from '../utils/navigate'
 import { NavBar } from '../components/NavBar'
@@ -256,7 +256,9 @@ export default function JobsPage() {
         setCachedAt(new Date().toISOString())
         saveCache(titles, loc, remote, lim, results)
       } catch (e) {
-        if (!opts?.background) {
+        if (e instanceof RateLimitError) {
+          toast.error(e.message)
+        } else if (!opts?.background) {
           setError(e instanceof Error ? e.message : 'Search failed')
           setJobs([])
         }
