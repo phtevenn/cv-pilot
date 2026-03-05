@@ -18,6 +18,50 @@ function uid(): string {
 const DELIMITER_RE = /^<!-- block:([a-z]+)\|([^>]*) -->$/
 
 // ---------------------------------------------------------------------------
+// Section heading detection (shared by migrateMarkdownToBlocks & parsePatchBlocks)
+// ---------------------------------------------------------------------------
+
+const _ALL_CAPS_BOLD_RE = /^\*\*([A-Z][A-Z0-9\s&/(),-]+)\*\*$/
+const _ATX_HEADING_RE = /^#{1,3}\s+([A-Za-z][A-Za-z0-9\s&/(),-]+)$/
+const _ANY_BOLD_RE = /^\*\*([A-Za-z][A-Za-z0-9\s&/(),-]*)\*\*$/
+const _KNOWN_SECTION_KW = [
+  'summary', 'objective', 'profile', 'about',
+  'experience', 'work', 'employment', 'career', 'professional',
+  'education', 'academic',
+  'skills', 'technical', 'technologies', 'tools', 'competencies',
+  'projects', 'project',
+  'publications', 'papers', 'research', 'journal',
+  'certifications', 'awards', 'honors', 'languages', 'interests',
+]
+
+function extractSectionHeading(line: string): string | null {
+  const trimmed = line.trim()
+  const allCaps = _ALL_CAPS_BOLD_RE.exec(trimmed)
+  if (allCaps) return allCaps[1].trim()
+  const atx = _ATX_HEADING_RE.exec(trimmed)
+  if (atx) return atx[1].trim()
+  const anyBold = _ANY_BOLD_RE.exec(trimmed)
+  if (anyBold) {
+    const text = anyBold[1].trim()
+    const lower = text.toLowerCase()
+    const isKnown = _KNOWN_SECTION_KW.some((kw) => lower === kw || lower.startsWith(kw + ' '))
+    if (isKnown) return text.toUpperCase()
+  }
+  return null
+}
+
+function guessBlockType(heading: string): BlockType {
+  const h = heading.toUpperCase()
+  if (/EXPERIENCE|WORK|EMPLOYMENT|CAREER|PROFESSIONAL/.test(h)) return 'experience'
+  if (/EDUCATION|ACADEMIC|DEGREE/.test(h)) return 'education'
+  if (/SKILL|TECHNICAL|TECHNOLOGY|TOOL|COMPETENC/.test(h)) return 'skills'
+  if (/PROJECT/.test(h)) return 'projects'
+  if (/PUBLICATION|PAPER|RESEARCH|JOURNAL/.test(h)) return 'publications'
+  if (/SUMMARY|OBJECTIVE|PROFILE|ABOUT/.test(h)) return 'summary'
+  return 'custom'
+}
+
+// ---------------------------------------------------------------------------
 // serializeBlocks
 // ---------------------------------------------------------------------------
 
@@ -93,43 +137,7 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
 
   const lines = markdown.split('\n')
 
-  // A section heading is a paragraph that is ONLY a bold word/phrase or an ATX heading.
-  // Primary: "**EXPERIENCE**" or "**WORK EXPERIENCE**" (all-caps bold)
-  // Also handles: "## Experience" (ATX heading, any case)
-  // Fallback: "**Experience**" (title-case bold) only when it matches a known section keyword —
-  //   this handles AI output that doesn't follow the all-caps instruction.
-  const ALL_CAPS_BOLD_RE = /^\*\*([A-Z][A-Z0-9\s&/(),-]+)\*\*$/
-  const ATX_HEADING_RE = /^#{1,3}\s+([A-Za-z][A-Za-z0-9\s&/(),-]+)$/
-  const ANY_BOLD_RE = /^\*\*([A-Za-z][A-Za-z0-9\s&/(),-]*)\*\*$/
-  // Known section keywords (lowercase) — used to validate mixed-case bold headings
-  const KNOWN_SECTION_KW = [
-    'summary', 'objective', 'profile', 'about',
-    'experience', 'work', 'employment', 'career', 'professional',
-    'education', 'academic',
-    'skills', 'technical', 'technologies', 'tools', 'competencies',
-    'projects', 'project',
-    'publications', 'papers', 'research', 'journal',
-    'certifications', 'awards', 'honors', 'languages', 'interests',
-  ]
-
-  function extractHeading(line: string): string | null {
-    const trimmed = line.trim()
-    const allCaps = ALL_CAPS_BOLD_RE.exec(trimmed)
-    if (allCaps) return allCaps[1].trim()
-    const atx = ATX_HEADING_RE.exec(trimmed)
-    if (atx) return atx[1].trim()
-    // Fallback: mixed-case bold that matches a known section keyword
-    const anyBold = ANY_BOLD_RE.exec(trimmed)
-    if (anyBold) {
-      const text = anyBold[1].trim()
-      const lower = text.toLowerCase()
-      const isKnown = KNOWN_SECTION_KW.some((kw) => lower === kw || lower.startsWith(kw + ' '))
-      if (isKnown) return text.toUpperCase()
-    }
-    return null
-  }
-
-  // Find all section boundaries
+  // Find all section boundaries — skip line 0 (always the person's name in a full resume)
   interface Section {
     lineIndex: number
     heading: string
@@ -137,22 +145,8 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
   const sections: Section[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    // Skip line 0 — the very first line is almost always the name, not a section
-    const heading = i > 0 ? extractHeading(lines[i]) : null
-    if (heading) {
-      sections.push({ lineIndex: i, heading })
-    }
-  }
-
-  const guessType = (heading: string): BlockType => {
-    const h = heading.toUpperCase()
-    if (/EXPERIENCE|WORK|EMPLOYMENT|CAREER|PROFESSIONAL/.test(h)) return 'experience'
-    if (/EDUCATION|ACADEMIC|DEGREE/.test(h)) return 'education'
-    if (/SKILL|TECHNICAL|TECHNOLOGY|TOOL|COMPETENC/.test(h)) return 'skills'
-    if (/PROJECT/.test(h)) return 'projects'
-    if (/PUBLICATION|PAPER|RESEARCH|JOURNAL/.test(h)) return 'publications'
-    if (/SUMMARY|OBJECTIVE|PROFILE|ABOUT/.test(h)) return 'summary'
-    return 'custom'
+    const heading = i > 0 ? extractSectionHeading(lines[i]) : null
+    if (heading) sections.push({ lineIndex: i, heading })
   }
 
   const blocks: ResumeBlock[] = []
@@ -216,7 +210,7 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
     // Content is everything after the heading line up to the next heading
     const contentLines = lines.slice(lineIndex + 1, nextLineIndex)
     const content = contentLines.join('\n').trim()
-    const type = guessType(heading)
+    const type = guessBlockType(heading)
     // Use heading text as title, title-cased
     const title = heading.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
 
@@ -229,6 +223,35 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
   }
 
   return blocks
+}
+
+// ---------------------------------------------------------------------------
+// parsePatchBlocks
+// Parses a resume-patch snippet (partial resume with only changed sections).
+// Unlike migrateMarkdownToBlocks, does NOT skip line 0 — patches start
+// directly with a section heading, not a person's name.
+// ---------------------------------------------------------------------------
+
+export function parsePatchBlocks(patchMarkdown: string): ResumeBlock[] {
+  if (!patchMarkdown.trim()) return []
+
+  const lines = patchMarkdown.split('\n')
+  const sections: Array<{ lineIndex: number; heading: string }> = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const heading = extractSectionHeading(lines[i])
+    if (heading) sections.push({ lineIndex: i, heading })
+  }
+
+  if (sections.length === 0) return []
+
+  return sections.map(({ lineIndex, heading }, i) => {
+    const nextLineIndex = i + 1 < sections.length ? sections[i + 1].lineIndex : lines.length
+    const content = lines.slice(lineIndex + 1, nextLineIndex).join('\n').trim()
+    const type = guessBlockType(heading)
+    const title = heading.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+    return { id: uid(), type, title, content }
+  })
 }
 
 // ---------------------------------------------------------------------------
