@@ -103,6 +103,43 @@ async def _fetch_jobs(query: str, location: str, remote_only: bool, pages: int =
     return resp.json().get("data", [])
 
 
+_RERANK_TOOL = {
+    "name": "rerank",
+    "description": (
+        "Submit relevance rankings for each job listing based on the candidate's resume. "
+        "Assign a score from 0 to 100 and a one-sentence reason for each job."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "rankings": {
+                "type": "array",
+                "description": "List of job rankings",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The job's unique identifier",
+                        },
+                        "score": {
+                            "type": "number",
+                            "description": "Relevance score from 0 to 100",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "One-sentence explanation of the score",
+                        },
+                    },
+                    "required": ["job_id", "score", "reason"],
+                },
+            }
+        },
+        "required": ["rankings"],
+    },
+}
+
+
 async def _rerank_with_claude(resume: str, jobs: list[dict]) -> list[dict]:
     try:
         client, model = get_client("score")
@@ -126,31 +163,49 @@ async def _rerank_with_claude(resume: str, jobs: list[dict]) -> list[dict]:
         "to the candidate's background (0-100) and provide a concise one-sentence reason.\n\n"
         f"Resume (excerpt):\n{resume[:2000]}\n\n"
         f"Jobs:\n{json.dumps(job_summaries, indent=2)}\n\n"
-        'Return a JSON array only, no other text:\n'
-        '[{"id": "<job_id>", "score": <0-100>, "reason": "<one sentence>"}]'
+        "Use the rerank tool to submit your rankings for every job listed above."
     )
+
+    rankings: list[dict] = []
 
     if isinstance(client, AsyncAnthropic):
         message = await client.messages.create(
-            model=model, max_tokens=1024,
+            model=model,
+            max_tokens=1024,
+            tools=[_RERANK_TOOL],
+            tool_choice={"type": "tool", "name": "rerank"},
             messages=[{"role": "user", "content": prompt}],
         )
-        text = message.content[0].text if message.content else "[]"
+        for block in message.content:
+            if block.type == "tool_use" and block.name == "rerank":
+                rankings = block.input.get("rankings", [])
+                break
     else:
+        # Fallback for non-Anthropic clients: ask for JSON and parse it
+        fallback_prompt = (
+            prompt
+            + '\nReturn a JSON array only, no other text:\n'
+            '[{"id": "<job_id>", "score": <0-100>, "reason": "<one sentence>"}]'
+        )
         response = await client.chat.completions.create(
-            model=model, max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": fallback_prompt}],
         )
         text = response.choices[0].message.content or "[]"
-    json_match = re.search(r"\[.*\]", text, re.DOTALL)
-    if not json_match:
-        return jobs
-    try:
-        rankings = json.loads(json_match.group())
-    except json.JSONDecodeError:
-        return jobs
+        json_match = re.search(r"\[.*\]", text, re.DOTALL)
+        if json_match:
+            try:
+                raw = json.loads(json_match.group())
+                rankings = [
+                    {"job_id": r["id"], "score": r.get("score", 50), "reason": r.get("reason", "")}
+                    for r in raw
+                    if "id" in r
+                ]
+            except (json.JSONDecodeError, KeyError):
+                pass
 
-    score_map = {r["id"]: (r.get("score", 50), r.get("reason", "")) for r in rankings if "id" in r}
+    score_map = {r["job_id"]: (r.get("score", 50), r.get("reason", "")) for r in rankings if "job_id" in r}
     for job in jobs:
         if job["id"] in score_map:
             job["match_score"], job["match_reason"] = score_map[job["id"]]
