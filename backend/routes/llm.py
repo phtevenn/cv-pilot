@@ -158,6 +158,89 @@ async def optimize(
     )
 
 
+_COVER_LETTER_SYSTEM = """\
+You are an expert career coach and professional writer. Given a resume and a job description, \
+write a tailored, compelling cover letter for the applicant.
+
+STYLE GUIDELINES:
+- Modern, confident, and conversational — not stiff or overly formal
+- Do NOT open with "I am writing to express my interest" or similar clichés
+- Do NOT use hollow phrases like "I am a passionate team player"
+- Open with a hook that connects the applicant's strongest relevant achievement to the role
+- Show genuine understanding of what the company/role needs
+- Draw specific evidence from the resume to demonstrate fit
+- Close with a clear, confident call to action
+- Length: 3–4 focused paragraphs — concise and impactful
+
+OUTPUT FORMAT:
+- Return only the cover letter text — no subject line, no meta-commentary
+- Use plain text paragraphs separated by blank lines (no markdown headers or bullet points)\
+"""
+
+_COVER_LETTER_USER_TEMPLATE = """\
+## Resume
+
+{resume}
+
+## Job Description
+
+{job}
+
+Write a tailored cover letter for this applicant."""
+
+
+@router.post("/cover-letter")
+@limiter.limit("10/hour")
+async def cover_letter(
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    body = await request.json()
+    resume: str = body.get("resume", "")
+    job: str = body.get("job_description", "")
+
+    if not resume.strip() or not job.strip():
+        raise HTTPException(status_code=422, detail="resume and job_description are required")
+
+    try:
+        client, model = get_client("optimize")
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    async def event_stream():
+        if isinstance(client, AsyncAnthropic):
+            async with client.messages.stream(
+                model=model,
+                max_tokens=2048,
+                system=_COVER_LETTER_SYSTEM,
+                messages=[{"role": "user", "content": _COVER_LETTER_USER_TEMPLATE.format(resume=resume, job=job)}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+        else:
+            stream = await client.chat.completions.create(
+                model=model,
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": _COVER_LETTER_SYSTEM},
+                    {"role": "user", "content": _COVER_LETTER_USER_TEMPLATE.format(resume=resume, job=job)},
+                ],
+                stream=True,
+            )
+            async for chunk in stream:
+                text = chunk.choices[0].delta.content or ""
+                if text:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 _SCORE_SYSTEM = (
     "You are an expert ATS (Applicant Tracking System) analyst. "
     "Given a resume and a job description, score how well the resume matches the role. "

@@ -4,6 +4,7 @@ import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
 import OnboardingModal from '../components/OnboardingModal'
+import CoverLetterModal from '../components/CoverLetterModal'
 import ChatPanel from '../components/ChatPanel'
 import BlockEditor from '../components/BlockEditor'
 import BlockResumePreview from '../components/BlockResumePreview'
@@ -34,6 +35,7 @@ export default function EditorPage() {
   const [content, setContent] = useState('')
   const [blocks, setBlocks] = useState<ResumeBlock[]>([])
   const [saving, setSaving] = useState(false)
+  const [showCoverLetter, setShowCoverLetter] = useState(false)
   const [showOptimize, setShowOptimize] = useState(() => {
     return !!sessionStorage.getItem('cv_pilot_prefill_job')
   })
@@ -433,6 +435,7 @@ export default function EditorPage() {
       <Toolbar
         saving={saving}
         onOptimize={() => setShowOptimize(true)}
+        onCoverLetter={() => setShowCoverLetter(true)}
         onExportPdf={handleExportPdf}
         exporting={exporting}
         versions={versions}
@@ -553,6 +556,13 @@ export default function EditorPage() {
 
       {showOnboarding && (
         <OnboardingModal onComplete={handleOnboardingComplete} />
+      )}
+
+      {showCoverLetter && blocksLoaded && (
+        <CoverLetterModal
+          resumeContent={blocksToMarkdown(blocks)}
+          onClose={() => setShowCoverLetter(false)}
+        />
       )}
 
       {showOptimize && blocksLoaded && (

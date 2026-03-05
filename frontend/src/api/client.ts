@@ -275,6 +275,50 @@ export const api = {
     }
   },
 
+  coverLetterStream: async (
+    resume: string,
+    jobDescription: string,
+    onChunk: (text: string) => void,
+  ): Promise<void> => {
+    const resp = await fetch(`${API_BASE}/api/llm/cover-letter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ resume, job_description: jobDescription }),
+    })
+    if (resp.status === 429) {
+      const retryAfter = parseRetryAfter(resp)
+      const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+      const msg = minutes
+        ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+        : 'Rate limit reached. Please try again later.'
+      throw new RateLimitError(msg, retryAfter)
+    }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: 'Cover letter request failed' }))
+      throw new Error((err as { detail?: string }).detail ?? 'Cover letter request failed')
+    }
+
+    const reader = resp.body!.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') return
+        try {
+          const parsed = JSON.parse(data) as { text?: string }
+          if (parsed.text) onChunk(parsed.text)
+        } catch {
+          // ignore malformed SSE chunks
+        }
+      }
+    }
+  },
+
   scoreResume: (resume: string, jobDescription: string) =>
     request<ScoreResult>('/api/llm/score', {
       method: 'POST',

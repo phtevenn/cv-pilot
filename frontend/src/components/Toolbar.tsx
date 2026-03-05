@@ -74,6 +74,7 @@ export interface DiffControls {
 interface ToolbarProps {
   saving: boolean
   onOptimize: () => void
+  onCoverLetter: () => void
   onExportPdf: () => void
   exporting: boolean
   versions: VersionMeta[]
@@ -149,6 +150,7 @@ function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: 
 export default function Toolbar({
   saving,
   onOptimize,
+  onCoverLetter,
   onExportPdf,
   exporting,
   versions,
@@ -218,6 +220,12 @@ export default function Toolbar({
             className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
           >
             ✦ Optimize with AI
+          </button>
+          <button
+            onClick={onCoverLetter}
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            ✦ Cover Letter
           </button>
         )}
 
