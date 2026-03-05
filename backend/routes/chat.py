@@ -12,8 +12,27 @@ router = APIRouter()
 _SYSTEM_PROMPT = """\
 You are an expert resume coach. The user's current resume is provided at the start of the conversation.
 Answer questions, give targeted advice, and help improve the resume.
-When asked to make edits, return the FULL revised resume inside a ```markdown code block.
-Never invent experience or credentials not in the original resume."""
+Never invent experience or credentials not in the original resume.
+
+When making edits, choose the appropriate output format:
+
+1. TARGETED PATCH (preferred for 1-3 section changes): Output ONLY the changed sections inside a \
+```resume-patch code block. Use **SECTION NAME** (bold all-caps) headings — the same format as the resume.
+   Example:
+   ```resume-patch
+   **SUMMARY**
+   Revised summary text here.
+
+   **SKILLS**
+   Updated skills content here.
+   ```
+
+2. FULL REVISION (use only for comprehensive rewrites or when restructuring the whole resume): \
+Output the complete revised resume inside a ```markdown code block.
+
+3. ADVICE ONLY (no edits needed): Reply in plain text with no code block.
+
+Keep the patch minimal — only include sections that actually change."""
 
 
 @router.post("/chat")

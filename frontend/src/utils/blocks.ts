@@ -232,6 +232,37 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
 }
 
 // ---------------------------------------------------------------------------
+// applyPatch
+// Merges a partial set of blocks (e.g. from a resume-patch AI response) into
+// the current full block list. Blocks are matched by type in order. Unpatched
+// blocks are kept as-is, so the result is always a full ResumeBlock[].
+// ---------------------------------------------------------------------------
+
+export function applyPatch(current: ResumeBlock[], patches: ResumeBlock[]): ResumeBlock[] {
+  // Group patches by type, preserving order within each type
+  const patchByType = new Map<string, ResumeBlock[]>()
+  for (const p of patches) {
+    if (!patchByType.has(p.type)) patchByType.set(p.type, [])
+    patchByType.get(p.type)!.push(p)
+  }
+
+  const usageByType = new Map<string, number>()
+
+  return current.map((block) => {
+    const typePatches = patchByType.get(block.type)
+    if (!typePatches) return block // no patch for this type → keep original
+
+    const idx = usageByType.get(block.type) ?? 0
+    usageByType.set(block.type, idx + 1)
+
+    const patch = typePatches[idx]
+    if (!patch) return block // more current blocks of this type than patches → keep original
+
+    return { ...block, content: patch.content, title: patch.title }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // blocksToMarkdown
 // Produces clean markdown for AI (no delimiter comments).
 // ---------------------------------------------------------------------------

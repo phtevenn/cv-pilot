@@ -16,6 +16,7 @@ import {
 } from '../utils/blockDiff'
 import type { BlockDiffEntry, BlockDiffStatus } from '../utils/blockDiff'
 import {
+  applyPatch,
   blocksToMarkdown,
   deserializeBlocks,
   migrateMarkdownToBlocks,
@@ -261,6 +262,14 @@ export default function EditorPage() {
     setBlockDiff(entries)
   }, [])
 
+  const handlePatch = useCallback((patchMarkdown: string) => {
+    const patchBlocks = migrateMarkdownToBlocks(patchMarkdown)
+    const revisedBlocks = applyPatch(blocksRef.current, patchBlocks)
+    const entries = computeBlockDiff(blocksRef.current, revisedBlocks)
+    if (countBlockDiffTotal(entries) === 0) return
+    setBlockDiff(entries)
+  }, [])
+
   const handleAcceptBlock = useCallback((id: string) => {
     setBlockDiff((prev) =>
       prev
@@ -475,6 +484,7 @@ export default function EditorPage() {
             onMessagesChange={setChatMessages}
             resume={blocksToMarkdown(blocks)}
             onRevision={handleRevision}
+            onPatch={handlePatch}
             onClose={() => setShowChat(false)}
             height={chatHeight}
             onHeightChange={setChatHeight}
