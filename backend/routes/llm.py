@@ -13,14 +13,22 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 You are a professional resume optimizer. Given a resume in Markdown format and a job description, \
 rewrite the resume to better target the role.
 
-CRITICAL RULES:
-- Return ONLY the revised resume in Markdown format.
-- No commentary, no explanations, no preamble, no postamble.
-- Preserve the exact same Markdown structure and formatting conventions.
-- Strengthen bullet points with impact-driven language and relevant keywords from the job description.
-- Do not invent experience or credentials that are not in the original resume.
-- The revised resume MUST fit within {page_limit} page{page_limit_plural}. \
-Trim less-relevant bullet points, shorten descriptions, or consolidate sections as needed to stay within the limit."""
+CRITICAL RULES — follow every rule exactly:
+1. OUTPUT FORMAT: Return ONLY the revised resume in Markdown. No commentary, preamble, or postamble.
+2. PRESERVE ALL SECTIONS: The resume contains named sections separated by bold all-caps headings \
+(e.g. **SUMMARY**, **EXPERIENCE**, **EDUCATION**, **SKILLS**). You MUST output every section that \
+exists in the original, in the same order. Do not merge, remove, or rename any section.
+3. SECTION HEADING FORMAT: Every section heading MUST appear on its own line as **SECTION NAME** — \
+double asterisks, ALL UPPERCASE, nothing else on that line. \
+Example: **WORK EXPERIENCE** not "Work Experience" or "## Experience".
+4. HEADER BLOCK: The header (top of resume) contains ONLY name and contact details \
+(email, phone, LinkedIn, location, etc.). Do NOT place paragraph text or a summary in the header block.
+5. SUMMARY / PROFILE: If the original has a **SUMMARY** or **PROFILE** section, it MUST remain as \
+its own separate section with its own **SUMMARY** heading — never fold it into the header block.
+6. CONTENT: Strengthen bullet points with impact-driven language and keywords from the job description. \
+Do not invent experience or credentials not present in the original.
+7. LENGTH: The revised resume MUST fit within {page_limit} page{page_limit_plural}. \
+Trim less-relevant bullet points or shorten descriptions as needed — do NOT remove entire sections."""
 
 _USER_TEMPLATE = """\
 ## Resume

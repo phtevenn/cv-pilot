@@ -93,10 +93,41 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
 
   const lines = markdown.split('\n')
 
-  // A section heading is a paragraph that is ONLY a bold all-caps word/phrase.
-  // E.g. "**EXPERIENCE**" or "**WORK EXPERIENCE**"
-  // We also handle lines like "## EXPERIENCE" (ATX headings).
-  const SECTION_RE = /^\*\*([A-Z][A-Z0-9\s&/(),-]+)\*\*$|^#{1,3}\s+([A-Z][A-Z0-9\s&/(),-]+)$/
+  // A section heading is a paragraph that is ONLY a bold word/phrase or an ATX heading.
+  // Primary: "**EXPERIENCE**" or "**WORK EXPERIENCE**" (all-caps bold)
+  // Also handles: "## Experience" (ATX heading, any case)
+  // Fallback: "**Experience**" (title-case bold) only when it matches a known section keyword —
+  //   this handles AI output that doesn't follow the all-caps instruction.
+  const ALL_CAPS_BOLD_RE = /^\*\*([A-Z][A-Z0-9\s&/(),-]+)\*\*$/
+  const ATX_HEADING_RE = /^#{1,3}\s+([A-Za-z][A-Za-z0-9\s&/(),-]+)$/
+  const ANY_BOLD_RE = /^\*\*([A-Za-z][A-Za-z0-9\s&/(),-]*)\*\*$/
+  // Known section keywords (lowercase) — used to validate mixed-case bold headings
+  const KNOWN_SECTION_KW = [
+    'summary', 'objective', 'profile', 'about',
+    'experience', 'work', 'employment', 'career', 'professional',
+    'education', 'academic',
+    'skills', 'technical', 'technologies', 'tools', 'competencies',
+    'projects', 'project',
+    'publications', 'papers', 'research', 'journal',
+    'certifications', 'awards', 'honors', 'languages', 'interests',
+  ]
+
+  function extractHeading(line: string): string | null {
+    const trimmed = line.trim()
+    const allCaps = ALL_CAPS_BOLD_RE.exec(trimmed)
+    if (allCaps) return allCaps[1].trim()
+    const atx = ATX_HEADING_RE.exec(trimmed)
+    if (atx) return atx[1].trim()
+    // Fallback: mixed-case bold that matches a known section keyword
+    const anyBold = ANY_BOLD_RE.exec(trimmed)
+    if (anyBold) {
+      const text = anyBold[1].trim()
+      const lower = text.toLowerCase()
+      const isKnown = KNOWN_SECTION_KW.some((kw) => lower === kw || lower.startsWith(kw + ' '))
+      if (isKnown) return text.toUpperCase()
+    }
+    return null
+  }
 
   // Find all section boundaries
   interface Section {
@@ -106,11 +137,10 @@ export function migrateMarkdownToBlocks(markdown: string): ResumeBlock[] {
   const sections: Section[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim()
-    const m = SECTION_RE.exec(trimmed)
     // Skip line 0 — the very first line is almost always the name, not a section
-    if (m && i > 0) {
-      sections.push({ lineIndex: i, heading: (m[1] ?? m[2]).trim() })
+    const heading = i > 0 ? extractHeading(lines[i]) : null
+    if (heading) {
+      sections.push({ lineIndex: i, heading })
     }
   }
 
