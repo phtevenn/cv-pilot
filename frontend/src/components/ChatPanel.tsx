@@ -65,7 +65,7 @@ function AssistantMessage({
           }`}
         >
           {applied
-            ? '✓ Reviewing edits'
+            ? '✓ Applied'
             : `Review ${patchSectionCount > 0 ? `${patchSectionCount} ` : ''}section edit${patchSectionCount !== 1 ? 's' : ''} ▶`}
         </button>
       )}
@@ -79,7 +79,7 @@ function AssistantMessage({
               : 'bg-indigo-600 hover:bg-indigo-500 text-white'
           }`}
         >
-          {applied ? '✓ Reviewing edits' : 'Review full revision ▶'}
+          {applied ? '✓ Applied' : 'Review full revision ▶'}
         </button>
       )}
     </div>
