@@ -9,10 +9,15 @@ from llm_client import get_client
 
 router = APIRouter()
 
+_CHAT_TOOLS = [{"type": "web_search_20250305", "name": "web_search"}]
+_CHAT_BETAS = ["web-search-2025-03-05"]
+
 _SYSTEM_PROMPT = """\
 You are an expert resume coach. The user's current resume is provided at the start of the conversation.
 Answer questions, give targeted advice, and help improve the resume.
 Never invent experience or credentials not in the original resume.
+You have access to web search — use it when the user asks about current job market trends, \
+required skills for a role, salary ranges, or anything else that benefits from up-to-date information.
 
 When making edits, choose the appropriate output format:
 
@@ -58,11 +63,13 @@ async def chat(
 
     async def event_stream():
         if isinstance(client, AsyncAnthropic):
-            async with client.messages.stream(
+            async with client.beta.messages.stream(
                 model=model,
                 max_tokens=4096,
                 system=_SYSTEM_PROMPT,
                 messages=full_messages,
+                tools=_CHAT_TOOLS,
+                betas=_CHAT_BETAS,
             ) as stream:
                 async for text in stream.text_stream:
                     yield f"data: {json.dumps({'text': text})}\n\n"

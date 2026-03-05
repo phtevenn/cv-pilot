@@ -29,6 +29,8 @@ function AssistantMessage({
   onRevision: (revised: string) => void
   onPatch: (patchMarkdown: string) => void
 }) {
+  const [applied, setApplied] = useState(false)
+
   const patchMatch = PATCH_RE.exec(content)
   const fullMatch = FULL_REVISION_RE.exec(content)
 
@@ -37,6 +39,16 @@ function AssistantMessage({
     ? (patchMatch[1].match(/^\*\*[A-Z]/gm) ?? []).length
     : 0
 
+  const handlePatchClick = () => {
+    onPatch(patchMatch![1].trim())
+    setApplied(true)
+  }
+
+  const handleRevisionClick = () => {
+    onRevision(fullMatch![1].trim())
+    setApplied(true)
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="prose prose-invert prose-sm max-w-none text-gray-200 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
@@ -44,18 +56,30 @@ function AssistantMessage({
       </div>
       {patchMatch && (
         <button
-          onClick={() => onPatch(patchMatch[1].trim())}
-          className="self-start px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+          onClick={handlePatchClick}
+          disabled={applied}
+          className={`self-start px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            applied
+              ? 'bg-green-800/60 text-green-300 cursor-default'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+          }`}
         >
-          Review {patchSectionCount > 0 ? `${patchSectionCount} ` : ''}section edit{patchSectionCount !== 1 ? 's' : ''} ▶
+          {applied
+            ? '✓ Reviewing edits'
+            : `Review ${patchSectionCount > 0 ? `${patchSectionCount} ` : ''}section edit${patchSectionCount !== 1 ? 's' : ''} ▶`}
         </button>
       )}
       {!patchMatch && fullMatch && (
         <button
-          onClick={() => onRevision(fullMatch[1].trim())}
-          className="self-start px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+          onClick={handleRevisionClick}
+          disabled={applied}
+          className={`self-start px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            applied
+              ? 'bg-green-800/60 text-green-300 cursor-default'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+          }`}
         >
-          Review full revision ▶
+          {applied ? '✓ Reviewing edits' : 'Review full revision ▶'}
         </button>
       )}
     </div>

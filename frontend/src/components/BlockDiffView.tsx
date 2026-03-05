@@ -235,6 +235,8 @@ interface Props {
   onDecline: (id: string) => void
   onAcceptAll: () => void
   onDeclineAll: () => void
+  isApplied?: boolean
+  onClose?: () => void
 }
 
 export default function BlockDiffView({
@@ -243,35 +245,64 @@ export default function BlockDiffView({
   onDecline,
   onAcceptAll,
   onDeclineAll,
+  isApplied = false,
+  onClose,
 }: Props) {
   const pending = entries.filter((e) => e.changeType !== 'unchanged' && e.status === 'pending')
   const total = entries.filter((e) => e.changeType !== 'unchanged')
   const unchanged = entries.filter((e) => e.changeType === 'unchanged')
   const changed = entries.filter((e) => e.changeType !== 'unchanged')
 
+  const acceptedCount = changed.filter((e) => e.status === 'accepted').length
+  const declinedCount = changed.filter((e) => e.status === 'declined').length
+
+  const summaryLabel = (() => {
+    if (acceptedCount > 0 && declinedCount > 0)
+      return `${acceptedCount} accepted · ${declinedCount} declined`
+    if (acceptedCount > 0)
+      return acceptedCount === total.length ? 'All changes accepted' : `${acceptedCount} accepted`
+    if (declinedCount > 0)
+      return declinedCount === total.length ? 'All changes declined' : `${declinedCount} declined`
+    return 'No changes'
+  })()
+
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
-        <span className="text-xs text-gray-300 font-medium">
-          {pending.length > 0
-            ? `${pending.length} of ${total.length} block changes pending`
-            : `All ${total.length} block changes reviewed`}
-        </span>
-        <div className="flex gap-2">
-          <button
-            onClick={onAcceptAll}
-            className="px-2.5 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
-          >
-            Accept All
-          </button>
-          <button
-            onClick={onDeclineAll}
-            className="px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
-          >
-            Decline All
-          </button>
-        </div>
+        {isApplied ? (
+          <>
+            <span className="text-xs text-green-400 font-medium">✓ Applied — {summaryLabel}</span>
+            <button
+              onClick={onClose}
+              className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
+            >
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-xs text-gray-300 font-medium">
+              {pending.length > 0
+                ? `${pending.length} of ${total.length} block changes pending`
+                : `All ${total.length} block changes reviewed`}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={onAcceptAll}
+                className="px-2.5 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded transition-colors"
+              >
+                Accept All
+              </button>
+              <button
+                onClick={onDeclineAll}
+                className="px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
+              >
+                Decline All
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Entry list — only changed blocks; unchanged collapsed to a summary line */}
