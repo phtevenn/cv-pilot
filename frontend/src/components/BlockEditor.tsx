@@ -177,7 +177,13 @@ function SortableBlockCard({
         </button>
       </div>
 
-      {/* CodeMirror editor */}
+      {/* CodeMirror editor
+          Each SortableBlockCard mounts its own CodeMirror instance (keyed by block.id),
+          so every block gets an independent EditorState with isolated undo/redo history.
+          Ctrl+Z / Ctrl+Shift+Z work within each block and do not affect other blocks.
+          The history() extension and historyKeymap are included automatically by
+          @uiw/codemirror-extensions-basic-setup (history and historyKeymap are enabled
+          unless explicitly set to false in the basicSetup prop). */}
       <div className={collapsed ? 'hidden' : ''}>
         <CodeMirror
           value={block.content}
@@ -191,6 +197,8 @@ function SortableBlockCard({
             lineNumbers: false,
             foldGutter: false,
             highlightActiveLine: true,
+            // history and historyKeymap are left at their default (true) so that
+            // Ctrl+Z / Ctrl+Shift+Z undo/redo work inside each block editor.
           }}
           style={{ fontSize: '12px', borderTop: '1px solid rgb(55 65 81)' }}
         />
