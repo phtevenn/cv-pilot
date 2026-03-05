@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
+import OnboardingModal from '../components/OnboardingModal'
 import ChatPanel from '../components/ChatPanel'
 import BlockEditor from '../components/BlockEditor'
 import BlockResumePreview from '../components/BlockResumePreview'
@@ -35,6 +36,9 @@ export default function EditorPage() {
   const [saving, setSaving] = useState(false)
   const [showOptimize, setShowOptimize] = useState(() => {
     return !!sessionStorage.getItem('cv_pilot_prefill_job')
+  })
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('cv_pilot_onboarded')
   })
   const [blocksLoaded, setBlocksLoaded] = useState(false)
   const [prefillJob] = useState<string>(() => {
@@ -343,6 +347,21 @@ export default function EditorPage() {
     )
   }, [])
 
+  const handleOnboardingComplete = useCallback(
+    (importedContent?: string, importedVersion?: VersionMeta) => {
+      if (importedContent && importedVersion) {
+        setContent(importedContent)
+        initBlocks(importedContent)
+        setActiveVersionId(importedVersion.id)
+        api.listVersions().then(setVersions).catch(() => {})
+      }
+      setShowOnboarding(false)
+    },
+    // initBlocks is stable (defined at module scope effectively via inline fn, but not memoized)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
   const handleMarginsChange = useCallback((m: Margins) => {
     setMargins(m)
     localStorage.setItem(MARGINS_STORAGE_KEY, JSON.stringify(m))
@@ -531,6 +550,10 @@ export default function EditorPage() {
           />
         )}
       </div>
+
+      {showOnboarding && (
+        <OnboardingModal onComplete={handleOnboardingComplete} />
+      )}
 
       {showOptimize && blocksLoaded && (
         <OptimizeModal
