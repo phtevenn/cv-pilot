@@ -11,17 +11,14 @@ ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Copy dependency manifest first for layer caching
-COPY pyproject.toml ./
+# Copy source (needed for editable install)
+COPY . .
 
 # Install Python dependencies
 RUN uv pip install --system -e .
 
 # Install Playwright with Chromium and its system dependencies
 RUN playwright install chromium --with-deps
-
-# Copy application source
-COPY . .
 
 # Ensure the data directory exists
 RUN mkdir -p /app/data/resumes
