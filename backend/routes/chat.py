@@ -1,5 +1,7 @@
 import json
+import re
 
+import httpx
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -9,7 +11,53 @@ from llm_client import get_client
 
 router = APIRouter()
 
-_CHAT_TOOLS = [{"type": "web_search_20250305", "name": "web_search"}]
+# ---------------------------------------------------------------------------
+# fetch_url tool — client-side tool for reading public URLs / GitHub files
+# ---------------------------------------------------------------------------
+
+_MAX_FETCH_CHARS = 12_000
+_GITHUB_BLOB_RE = re.compile(r"https://github\.com/([^/]+/[^/]+)/blob/(.+)")
+
+
+async def _fetch_url(url: str) -> str:
+    """Fetch a public URL and return up to _MAX_FETCH_CHARS of its text."""
+    # Convert GitHub blob URLs → raw.githubusercontent.com
+    blob_match = _GITHUB_BLOB_RE.match(url)
+    if blob_match:
+        url = f"https://raw.githubusercontent.com/{blob_match.group(1)}/{blob_match.group(2)}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as http:
+            resp = await http.get(url, headers={"User-Agent": "cv-pilot/1.0"})
+            resp.raise_for_status()
+            text = resp.text
+            if len(text) > _MAX_FETCH_CHARS:
+                text = text[:_MAX_FETCH_CHARS] + f"\n\n[... truncated at {_MAX_FETCH_CHARS} chars ...]"
+            return text
+    except httpx.HTTPStatusError as exc:
+        return f"HTTP {exc.response.status_code} error fetching {url}"
+    except Exception as exc:
+        return f"Error fetching {url}: {exc}"
+
+
+_FETCH_TOOL = {
+    "name": "fetch_url",
+    "description": (
+        "Fetch the full text content of any public URL — GitHub files, documentation, job postings, etc. "
+        "For GitHub source files prefer the raw URL format: "
+        "https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}. "
+        "GitHub blob URLs (github.com/.../blob/...) are converted automatically."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "The public URL to fetch."}
+        },
+        "required": ["url"],
+    },
+}
+
+_CHAT_TOOLS = [{"type": "web_search_20250305", "name": "web_search"}, _FETCH_TOOL]
 _CHAT_BETAS = ["web-search-2025-03-05"]
 
 _SYSTEM_PROMPT = """\
@@ -18,6 +66,8 @@ Answer questions, give targeted advice, and help improve the resume.
 Never invent experience or credentials not in the original resume.
 You have access to web search — use it when the user asks about current job market trends, \
 required skills for a role, salary ranges, or anything else that benefits from up-to-date information.
+You also have a fetch_url tool — use it to read the full contents of any public URL the user shares, \
+including GitHub repositories, raw source files, documentation pages, and job postings.
 
 When making edits, choose the appropriate output format:
 
@@ -63,19 +113,49 @@ async def chat(
 
     async def event_stream():
         if isinstance(client, AsyncAnthropic):
-            async with client.beta.messages.stream(
-                model=model,
-                max_tokens=4096,
-                system=_SYSTEM_PROMPT,
-                messages=full_messages,
-                tools=_CHAT_TOOLS,
-                betas=_CHAT_BETAS,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield f"data: {json.dumps({'text': text})}\n\n"
+            loop_messages = list(full_messages)
+            max_iterations = 5  # guard against infinite tool loops
+
+            for _ in range(max_iterations):
+                async with client.beta.messages.stream(
+                    model=model,
+                    max_tokens=4096,
+                    system=_SYSTEM_PROMPT,
+                    messages=loop_messages,
+                    tools=_CHAT_TOOLS,
+                    betas=_CHAT_BETAS,
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield f"data: {json.dumps({'text': text})}\n\n"
+                    final_msg = await stream.get_final_message()
+
+                if final_msg.stop_reason != "tool_use":
+                    break
+
+                # Only handle our custom fetch_url tool (web_search is transparent)
+                fetch_blocks = [
+                    b for b in final_msg.content
+                    if b.type == "tool_use" and b.name == "fetch_url"
+                ]
+                if not fetch_blocks:
+                    break
+
+                tool_results = []
+                for block in fetch_blocks:
+                    url = block.input.get("url", "")
+                    content = await _fetch_url(url)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": content,
+                    })
+
+                loop_messages = loop_messages + [
+                    {"role": "assistant", "content": final_msg.content},
+                    {"role": "user", "content": tool_results},
+                ]
         else:
-            # OpenAI-compatible (OpenRouter / Nvidia NIM)
-            # Prepend system prompt as a system message
+            # OpenAI-compatible (OpenRouter / Nvidia NIM) — no tool support
             oai_messages = [{"role": "system", "content": _SYSTEM_PROMPT}, *full_messages]
             stream = await client.chat.completions.create(
                 model=model,
