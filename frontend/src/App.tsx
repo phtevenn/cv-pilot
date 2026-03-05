@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage'
 import EditorPage from './pages/EditorPage'
 import JobsPage from './pages/JobsPage'
 import ApplicationsPage from './pages/ApplicationsPage'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 function AppInner() {
   const { user, login, isLoading } = useAuth()
@@ -43,9 +44,11 @@ function AppInner() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppInner />
-      <Toaster position="bottom-right" theme="dark" richColors />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppInner />
+        <Toaster position="bottom-right" theme="dark" richColors />
+      </AuthProvider>
+    </ErrorBoundary>
   )
 }
