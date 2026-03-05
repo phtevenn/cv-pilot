@@ -15,6 +15,22 @@ export interface ChatMessage {
   content: string
 }
 
+export interface ScoreCategoryDetail {
+  score: number
+  notes: string
+}
+
+export interface ScoreResult {
+  overall: number
+  categories: {
+    keywords: ScoreCategoryDetail
+    skills: ScoreCategoryDetail
+    experience: ScoreCategoryDetail
+    seniority: ScoreCategoryDetail
+  }
+  summary: string
+}
+
 export interface JobResult {
   id: string
   title: string
@@ -203,6 +219,12 @@ export const api = {
       }
     }
   },
+
+  scoreResume: (resume: string, jobDescription: string) =>
+    request<ScoreResult>('/api/llm/score', {
+      method: 'POST',
+      body: JSON.stringify({ resume, job_description: jobDescription }),
+    }),
 
   optimizeStream: async (
     resume: string,
