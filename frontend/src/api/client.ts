@@ -169,6 +169,29 @@ export const api = {
   deleteVersion: (id: string) =>
     request<{ ok: boolean }>(`/api/resume/versions/${id}`, { method: 'DELETE' }),
 
+  importPdf: async (file: File): Promise<{ version: VersionMeta; content: string }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const resp = await fetch(`${API_BASE}/api/resume/import-pdf`, {
+      method: 'POST',
+      headers: { ...authHeaders() },
+      body: formData,
+    })
+    if (resp.status === 429) {
+      const retryAfter = parseRetryAfter(resp)
+      const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+      const msg = minutes
+        ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+        : 'Rate limit reached. Please try again later.'
+      throw new RateLimitError(msg, retryAfter)
+    }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+      throw new Error((err as { detail?: string }).detail ?? 'PDF import failed')
+    }
+    return resp.json() as Promise<{ version: VersionMeta; content: string }>
+  },
+
   exportPdf: async (html: string, margins?: Margins): Promise<Blob> => {
     const resp = await fetch(`${API_BASE}/api/export/pdf`, {
       method: 'POST',

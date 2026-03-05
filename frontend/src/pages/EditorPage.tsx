@@ -51,6 +51,7 @@ export default function EditorPage() {
   const [applySuccess, setApplySuccess] = useState(false)
   const [applying, setApplying] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [importingPdf, setImportingPdf] = useState(false)
   const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
@@ -256,6 +257,28 @@ export default function EditorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const handleImportPdf: React.ChangeEventHandler<HTMLInputElement> = useCallback(async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImportingPdf(true)
+    try {
+      const result = await api.importPdf(file)
+      setContent(result.content)
+      initBlocks(result.content)
+      setActiveVersionId(result.version.id)
+      const vers = await api.listVersions()
+      setVersions(vers)
+      toast.success(`Imported "${result.version.name}" as a new version`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'PDF import failed'
+      toast.error(msg)
+    } finally {
+      setImportingPdf(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Block diff handlers ───────────────────────────────────────────────────
 
   const openDiff = useCallback((entries: BlockDiffEntry[]) => {
@@ -401,6 +424,8 @@ export default function EditorPage() {
         onDeleteVersion={handleDeleteVersion}
         onExportMd={handleExportMd}
         onImportMd={handleImportMd}
+        onImportPdf={handleImportPdf}
+        importingPdf={importingPdf}
         margins={margins}
         onMarginsChange={handleMarginsChange}
         diffControls={diffControls}
