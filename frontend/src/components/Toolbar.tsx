@@ -73,7 +73,6 @@ export interface DiffControls {
 
 interface ToolbarProps {
   saving: boolean
-  saveError: string | null
   onOptimize: () => void
   onExportPdf: () => void
   exporting: boolean
@@ -147,7 +146,6 @@ function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: 
 
 export default function Toolbar({
   saving,
-  saveError,
   onOptimize,
   onExportPdf,
   exporting,
@@ -167,9 +165,7 @@ export default function Toolbar({
 }: ToolbarProps) {
   const { user, logout } = useAuth()
 
-  const saveStatus = saveError ? (
-    <span className="text-red-400">{saveError}</span>
-  ) : saving ? (
+  const saveStatus = saving ? (
     <span className="text-gray-500">Saving…</span>
   ) : (
     <span className="text-gray-500">Saved</span>

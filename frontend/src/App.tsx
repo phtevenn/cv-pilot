@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './pages/LoginPage'
 import EditorPage from './pages/EditorPage'
@@ -44,6 +45,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppInner />
+      <Toaster position="bottom-right" theme="dark" richColors />
     </AuthProvider>
   )
 }

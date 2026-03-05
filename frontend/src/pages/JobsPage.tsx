@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { JobResult } from '../api/client'
 import { navigate } from '../utils/navigate'
@@ -82,9 +83,10 @@ function JobCard({ job }: { job: JobResult }) {
         notes: '',
       })
       setTracked(true)
+      toast.success('Application tracked successfully.')
     } catch (e) {
       console.error('Failed to track application', e)
-      alert('Failed to track application. Please try again.')
+      toast.error('Failed to track application. Please try again.')
     } finally {
       setTracking(false)
     }

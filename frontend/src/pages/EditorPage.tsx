@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import Toolbar from '../components/Toolbar'
 import type { DiffControls } from '../components/Toolbar'
 import OptimizeModal from '../components/OptimizeModal'
@@ -32,7 +33,6 @@ export default function EditorPage() {
   const [content, setContent] = useState('')
   const [blocks, setBlocks] = useState<ResumeBlock[]>([])
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [showOptimize, setShowOptimize] = useState(() => {
     return !!sessionStorage.getItem('cv_pilot_prefill_job')
   })
@@ -138,11 +138,10 @@ export default function EditorPage() {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
-      setSaveError(null)
       try {
         await api.saveResume(value)
       } catch {
-        setSaveError('Save failed')
+        toast.error('Save failed. Your changes may not be saved.')
       } finally {
         setSaving(false)
       }
@@ -169,8 +168,10 @@ export default function EditorPage() {
       a.download = 'resume.pdf'
       a.click()
       URL.revokeObjectURL(url)
+      toast.success('PDF exported successfully.')
     } catch (e) {
       console.error('PDF export failed:', e)
+      toast.error('PDF export failed. Please try again.')
     } finally {
       setExporting(false)
     }
@@ -235,6 +236,7 @@ export default function EditorPage() {
     a.download = filename
     a.click()
     URL.revokeObjectURL(url)
+    toast.success(`Exported ${filename}`)
   }, [versions, activeVersionId])
 
   const handleImportMd: React.ChangeEventHandler<HTMLInputElement> = useCallback(async (e) => {
@@ -388,7 +390,6 @@ export default function EditorPage() {
     <div className="flex flex-col h-screen bg-gray-950">
       <Toolbar
         saving={saving}
-        saveError={saveError}
         onOptimize={() => setShowOptimize(true)}
         onExportPdf={handleExportPdf}
         exporting={exporting}
