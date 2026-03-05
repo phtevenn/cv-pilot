@@ -14,6 +14,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "limits>=3.6.0",
     "sqlmodel>=0.0.21",
+    "pdfplumber>=0.11.0",
 ]
 
 [project.optional-dependencies]

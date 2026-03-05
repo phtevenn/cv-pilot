@@ -84,6 +84,8 @@ interface ToolbarProps {
   onDeleteVersion: () => void
   onExportMd: () => void
   onImportMd: React.ChangeEventHandler<HTMLInputElement>
+  onImportPdf: React.ChangeEventHandler<HTMLInputElement>
+  importingPdf: boolean
   margins: Margins
   onMarginsChange: (m: Margins) => void
   diffControls?: DiffControls
@@ -157,6 +159,8 @@ export default function Toolbar({
   onDeleteVersion,
   onExportMd,
   onImportMd,
+  onImportPdf,
+  importingPdf,
   margins,
   onMarginsChange,
   diffControls,
@@ -252,6 +256,23 @@ export default function Toolbar({
             accept=".md,text/markdown"
             className="sr-only"
             onChange={onImportMd}
+          />
+        </label>
+
+        <label
+          className={`px-3 py-1.5 text-white text-xs font-medium rounded-lg transition-colors ${
+            importingPdf
+              ? 'bg-gray-600 opacity-60 cursor-not-allowed'
+              : 'bg-gray-700 hover:bg-gray-600 cursor-pointer'
+          }`}
+        >
+          {importingPdf ? 'Importing…' : 'Import PDF'}
+          <input
+            type="file"
+            accept=".pdf,application/pdf"
+            className="sr-only"
+            disabled={importingPdf}
+            onChange={onImportPdf}
           />
         </label>
 
