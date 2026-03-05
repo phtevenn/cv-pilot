@@ -246,6 +246,8 @@ export default function BlockDiffView({
 }: Props) {
   const pending = entries.filter((e) => e.changeType !== 'unchanged' && e.status === 'pending')
   const total = entries.filter((e) => e.changeType !== 'unchanged')
+  const unchanged = entries.filter((e) => e.changeType === 'unchanged')
+  const changed = entries.filter((e) => e.changeType !== 'unchanged')
 
   return (
     <div className="flex flex-col h-full bg-gray-900">
@@ -272,9 +274,9 @@ export default function BlockDiffView({
         </div>
       </div>
 
-      {/* Entry list */}
+      {/* Entry list — only changed blocks; unchanged collapsed to a summary line */}
       <div className="flex-1 overflow-auto p-3 space-y-2">
-        {entries.map((entry) => (
+        {changed.map((entry) => (
           <EntryCard
             key={entry.id}
             entry={entry}
@@ -282,6 +284,11 @@ export default function BlockDiffView({
             onDecline={() => onDecline(entry.id)}
           />
         ))}
+        {unchanged.length > 0 && (
+          <p className="text-center text-gray-600 text-xs py-1">
+            {unchanged.length} section{unchanged.length !== 1 ? 's' : ''} unchanged
+          </p>
+        )}
       </div>
     </div>
   )

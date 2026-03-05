@@ -4,13 +4,17 @@ import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
 import type { ChatMessage } from '../api/client'
 
-const MD_CODE_BLOCK_RE = /```(?:markdown)?\n([\s\S]*?)\n```/
+// Matches a full ```markdown``` code block (full revision)
+const FULL_REVISION_RE = /```markdown\n([\s\S]*?)\n```/
+// Matches a ```resume-patch``` code block (targeted section patch)
+const PATCH_RE = /```resume-patch\n([\s\S]*?)\n```/
 
 interface ChatPanelProps {
   messages: ChatMessage[]
   onMessagesChange: (messages: ChatMessage[]) => void
   resume: string
   onRevision: (revised: string) => void
+  onPatch: (patchMarkdown: string) => void
   onClose: () => void
   height: number
   onHeightChange: (h: number) => void
@@ -19,22 +23,39 @@ interface ChatPanelProps {
 function AssistantMessage({
   content,
   onRevision,
+  onPatch,
 }: {
   content: string
   onRevision: (revised: string) => void
+  onPatch: (patchMarkdown: string) => void
 }) {
-  const match = MD_CODE_BLOCK_RE.exec(content)
+  const patchMatch = PATCH_RE.exec(content)
+  const fullMatch = FULL_REVISION_RE.exec(content)
+
+  // Count sections in a patch to show in the button label
+  const patchSectionCount = patchMatch
+    ? (patchMatch[1].match(/^\*\*[A-Z]/gm) ?? []).length
+    : 0
+
   return (
     <div className="flex flex-col gap-2">
       <div className="prose prose-invert prose-sm max-w-none text-gray-200 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
-      {match && (
+      {patchMatch && (
         <button
-          onClick={() => onRevision(match[1].trim())}
+          onClick={() => onPatch(patchMatch[1].trim())}
           className="self-start px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
         >
-          Apply Changes ▶
+          Review {patchSectionCount > 0 ? `${patchSectionCount} ` : ''}section edit{patchSectionCount !== 1 ? 's' : ''} ▶
+        </button>
+      )}
+      {!patchMatch && fullMatch && (
+        <button
+          onClick={() => onRevision(fullMatch[1].trim())}
+          className="self-start px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Review full revision ▶
         </button>
       )}
     </div>
@@ -46,6 +67,7 @@ export default function ChatPanel({
   onMessagesChange,
   resume,
   onRevision,
+  onPatch,
   onClose,
   height,
   onHeightChange,
@@ -160,7 +182,7 @@ export default function ChatPanel({
               }`}
             >
               {msg.role === 'assistant' ? (
-                <AssistantMessage content={msg.content} onRevision={onRevision} />
+                <AssistantMessage content={msg.content} onRevision={onRevision} onPatch={onPatch} />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>
               )}
