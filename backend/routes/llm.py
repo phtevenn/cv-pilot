@@ -24,7 +24,8 @@ Example: **WORK EXPERIENCE** not "Work Experience" or "## Experience".
 4. HEADER BLOCK: The header (top of resume) contains ONLY name and contact details \
 (email, phone, LinkedIn, location, etc.). Do NOT place paragraph text or a summary in the header block.
 5. SUMMARY / PROFILE: If the original has a **SUMMARY** or **PROFILE** section, it MUST remain as \
-its own separate section with its own **SUMMARY** heading — never fold it into the header block.
+its own separate section with its own **SUMMARY** heading — never fold it into the header block. \
+Write the summary as 1–2 concise sentences only. No bullet points, no long paragraphs.
 6. CONTENT: Strengthen bullet points with impact-driven language and keywords from the job description. \
 Do not invent experience or credentials not present in the original.
 7. LENGTH: The revised resume MUST fit within {page_limit} page{page_limit_plural}. \
