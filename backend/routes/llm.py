@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from deps import get_current_user
 from llm_client import get_client
+from rate_limit import limiter
 
 router = APIRouter()
 
@@ -102,6 +103,7 @@ _USER_TEMPLATE = """\
 
 
 @router.post("/optimize")
+@limiter.limit("10/hour")
 async def optimize(
     request: Request,
     user: dict = Depends(get_current_user),
