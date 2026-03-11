@@ -197,6 +197,7 @@ export default function JobsPage() {
   const [limit, setLimit] = useState(10)
   const [jobs, setJobs] = useState<JobResult[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingStatus, setLoadingStatus] = useState('')
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
@@ -240,33 +241,50 @@ export default function JobsPage() {
         setBackgroundRefreshing(true)
       } else {
         setLoading(true)
+        setLoadingStatus('Searching…')
         setError(null)
         setSearched(true)
       }
 
+      let finalResults: JobResult[] = []
+
       try {
-        const results = await api.searchJobs({
-          job_titles: titles,
-          location: loc,
-          remote_only: remote,
-          limit: lim,
-        })
-        setJobs(results)
+        await api.searchJobsStream(
+          { job_titles: titles, location: loc, remote_only: remote, limit: lim },
+          () => {
+            // intermediate jobs events — unused, progress events handle status
+          },
+          (jobs) => {
+            // AI reranking complete — show all results at once
+            finalResults = jobs
+            setJobs(jobs)
+            setLoading(false)
+            setLoadingStatus('')
+          },
+          (message) => {
+            if (!opts?.background) setLoadingStatus(message)
+          },
+        )
         setIsCached(false)
         setCachedAt(new Date().toISOString())
-        saveCache(titles, loc, remote, lim, results)
+        saveCache(titles, loc, remote, lim, finalResults)
       } catch (e) {
         if (e instanceof RateLimitError) {
           toast.error(e.message)
         } else if (!opts?.background) {
-          setError(e instanceof Error ? e.message : 'Search failed')
-          setJobs([])
+          if (finalResults.length > 0) {
+            // We got results before the stream error — keep them, just toast
+            toast.error('Search ended early. Showing partial results.')
+          } else {
+            setError(e instanceof Error ? e.message : 'Search failed')
+          }
         }
       } finally {
         if (opts?.background) {
           setBackgroundRefreshing(false)
         } else {
           setLoading(false)
+          setLoadingStatus('')
         }
       }
     },
@@ -431,10 +449,18 @@ export default function JobsPage() {
 
         {/* Results */}
         {loading && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <SkeletonCard key={i} />
-            ))}
+          <div className="flex flex-col gap-4">
+            {loadingStatus && (
+              <p className="text-gray-500 text-xs flex items-center gap-2">
+                <span className="inline-block w-3 h-3 border-2 border-gray-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                {loadingStatus}
+              </p>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
           </div>
         )}
 

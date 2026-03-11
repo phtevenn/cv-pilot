@@ -257,6 +257,61 @@ export const api = {
     body: JSON.stringify(params),
   }),
 
+  searchJobsStream: async (
+    params: {
+      job_titles: string[]
+      location: string
+      remote_only: boolean
+      limit?: number
+    },
+    onJobs: (jobs: JobResult[]) => void,
+    onReranked: (jobs: JobResult[]) => void,
+    onProgress?: (message: string) => void,
+  ): Promise<void> => {
+    const resp = await fetch(`${API_BASE}/api/jobs/search-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(params),
+    })
+    if (resp.status === 429) {
+      const retryAfter = parseRetryAfter(resp)
+      const minutes = retryAfter != null ? Math.ceil(retryAfter / 60) : null
+      const msg = minutes
+        ? `Rate limit reached. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`
+        : 'Rate limit reached. Please try again later.'
+      throw new RateLimitError(msg, retryAfter)
+    }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+      throw new Error((err as { detail?: string }).detail ?? 'Search failed')
+    }
+
+    const reader = resp.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        try {
+          const parsed = JSON.parse(data) as { type: string; jobs?: JobResult[]; message?: string }
+          if (parsed.type === 'progress' && parsed.message) onProgress?.(parsed.message)
+          else if (parsed.type === 'jobs' && parsed.jobs) onJobs(parsed.jobs)
+          else if (parsed.type === 'reranked' && parsed.jobs) onReranked(parsed.jobs)
+          else if (parsed.type === 'done') return
+        } catch {
+          // ignore malformed chunks
+        }
+      }
+    }
+  },
+
   chatStream: async (
     resume: string,
     messages: ChatMessage[],

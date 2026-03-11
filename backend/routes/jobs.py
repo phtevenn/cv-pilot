@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from anthropic import AsyncAnthropic
@@ -93,7 +94,7 @@ async def _fetch_jobs(query: str, location: str, remote_only: bool, pages: int =
         "X-RapidAPI-Key": JSEARCH_API_KEY,
         "X-RapidAPI-Host": RAPIDAPI_HOST,
     }
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=max(15.0, pages * 8.0)) as client:
         resp = await client.get(
             f"https://{RAPIDAPI_HOST}/search",
             params=params,
@@ -101,6 +102,33 @@ async def _fetch_jobs(query: str, location: str, remote_only: bool, pages: int =
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"JSearch API error: {resp.status_code}")
+    return resp.json().get("data", [])
+
+
+async def _fetch_jobs_page(query: str, location: str, remote_only: bool, page: int) -> list[dict]:
+    """Fetch a single page from JSearch."""
+    if not JSEARCH_API_KEY:
+        raise HTTPException(status_code=503, detail="JSEARCH_API_KEY not configured")
+    params: dict = {
+        "query": f"{query} in {location}" if location else query,
+        "page": str(page),
+        "num_pages": "1",
+        "date_posted": "month",
+    }
+    if remote_only:
+        params["remote_jobs_only"] = "true"
+    headers = {
+        "X-RapidAPI-Key": JSEARCH_API_KEY,
+        "X-RapidAPI-Host": RAPIDAPI_HOST,
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"https://{RAPIDAPI_HOST}/search",
+            params=params,
+            headers=headers,
+        )
+    if resp.status_code != 200:
+        return []
     return resp.json().get("data", [])
 
 
@@ -251,3 +279,67 @@ async def search_jobs(
     reranked = await _rerank_with_claude(resume, candidates)
     reranked.sort(key=lambda j: j["match_score"], reverse=True)
     return reranked[:effective_limit]
+
+
+@router.post("/search-stream")
+@limiter.limit("20/hour")
+async def search_jobs_stream(
+    request: Request,
+    body: SearchRequest,
+    user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    user_id: str = user["sub"]
+    resume = storage.load_resume(user_id)
+    resume_keywords = _extract_keywords(resume)
+
+    effective_limit = body.limit if 1 <= body.limit <= _RECO_MAX else RECO_LIMIT
+    pool_size = min(effective_limit * 2, 50)
+    pages_needed = max(1, min((pool_size + 9) // 10, 5))
+
+    if len(body.job_titles) > 1:
+        query = f"({' OR '.join(body.job_titles)})"
+    else:
+        query = body.job_titles[0] if body.job_titles else ""
+
+    async def generate():
+        all_raw_jobs: list[dict] = []
+
+        for page in range(1, pages_needed + 1):
+            try:
+                page_jobs = await _fetch_jobs_page(query, body.location, body.remote_only, page)
+            except Exception:
+                page_jobs = []
+            if page_jobs:
+                all_raw_jobs.extend(page_jobs)
+            count = len(all_raw_jobs)
+            if pages_needed > 1:
+                msg = f"Found {count} listing{'s' if count != 1 else ''}… (page {page}/{pages_needed})"
+            else:
+                msg = f"Found {count} listing{'s' if count != 1 else ''}…"
+            yield f"data: {json.dumps({'type': 'progress', 'message': msg})}\n\n"
+
+        if not all_raw_jobs:
+            yield 'data: {"type": "done"}\n\n'
+            return
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': 'Ranking with AI…'})}\n\n"
+
+        sorted_raw = sorted(
+            all_raw_jobs,
+            key=lambda j: _keyword_score(
+                resume_keywords,
+                (j.get("job_description") or "") + " " + (j.get("job_title") or ""),
+            ),
+            reverse=True,
+        )
+        candidates = [_normalize_job(j) for j in sorted_raw[:pool_size]]
+        reranked = await _rerank_with_claude(resume, candidates)
+        reranked.sort(key=lambda j: j["match_score"], reverse=True)
+        yield f"data: {json.dumps({'type': 'reranked', 'jobs': reranked[:effective_limit]})}\n\n"
+        yield 'data: {"type": "done"}\n\n'
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
