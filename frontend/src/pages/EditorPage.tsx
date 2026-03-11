@@ -67,6 +67,7 @@ export default function EditorPage() {
   const [diffApplied, setDiffApplied] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [mobilePane, setMobilePane] = useState<'editor' | 'preview'>('editor')
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [editorWidthPct, setEditorWidthPct] = useState(50)
   const [chatHeight, setChatHeight] = useState(320)
@@ -206,31 +207,23 @@ export default function EditorPage() {
     [activeVersionId, flushSave],
   )
 
-  const handleNewVersion = useCallback(async () => {
-    const name = window.prompt('Version name:')
-    if (!name?.trim()) return
+  const handleNewVersion = useCallback(async (name: string) => {
     await flushSave()
-    const meta = await api.createVersion(name.trim(), contentRef.current)
+    const meta = await api.createVersion(name, contentRef.current)
     setActiveVersionId(meta.id)
     const vers = await api.listVersions()
     setVersions(vers)
   }, [flushSave])
 
-  const handleRenameVersion = useCallback(async () => {
-    const active = versions.find((v) => v.id === activeVersionId)
-    if (!active) return
-    const newName = window.prompt('New name:', active.name)
-    if (!newName?.trim() || newName.trim() === active.name) return
-    await api.updateVersion(active.id, { name: newName.trim() })
+  const handleRenameVersion = useCallback(async (id: string, name: string) => {
+    await api.updateVersion(id, { name })
     const vers = await api.listVersions()
     setVersions(vers)
-  }, [versions, activeVersionId])
+  }, [])
 
-  const handleDeleteVersion = useCallback(async () => {
+  const handleDeleteVersion = useCallback(async (id: string) => {
     if (versions.length <= 1) return
-    const active = versions.find((v) => v.id === activeVersionId)
-    if (!window.confirm(`Delete version "${active?.name}"? This cannot be undone.`)) return
-    await api.deleteVersion(activeVersionId!)
+    await api.deleteVersion(id)
     const [resume, vers] = await Promise.all([api.getResume(), api.listVersions()])
     setContent(resume.content)
     initBlocks(resume.content)
@@ -238,7 +231,27 @@ export default function EditorPage() {
     const newActive = vers.find((v) => v.is_active)
     if (newActive) setActiveVersionId(newActive.id)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [versions, activeVersionId])
+  }, [versions])
+
+  const handleDuplicateVersion = useCallback(async (id: string) => {
+    const source = versions.find((v) => v.id === id)
+    let sourceContent: string
+    if (id === activeVersionId) {
+      await flushSave()
+      sourceContent = contentRef.current
+    } else {
+      const data = await api.loadVersion(id)
+      sourceContent = data.content
+    }
+    const name = `${source?.name ?? 'Version'} (copy)`
+    const meta = await api.createVersion(name, sourceContent)
+    setActiveVersionId(meta.id)
+    setContent(sourceContent)
+    initBlocks(sourceContent)
+    const vers = await api.listVersions()
+    setVersions(vers)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versions, activeVersionId, flushSave])
 
   const handleSwitchResume = useCallback(
     async (resumeId: string) => {
@@ -262,23 +275,17 @@ export default function EditorPage() {
     [activeResumeId, flushSave],
   )
 
-  const handleNewResume = useCallback(async () => {
-    const name = window.prompt('Resume name:')
-    if (!name?.trim()) return
-    const newResume = await api.createResume(name.trim())
+  const handleNewResume = useCallback(async (name: string) => {
+    const newResume = await api.createResume(name)
     await handleSwitchResume(newResume.id)
   }, [handleSwitchResume])
 
-  const handleCloneResume = useCallback(async () => {
+  const handleCloneResume = useCallback(async (name: string) => {
     if (!activeResumeId) return
-    const currentResume = resumes.find((r) => r.id === activeResumeId)
-    const defaultName = currentResume ? `${currentResume.name} (copy)` : 'Copy'
-    const name = window.prompt('Name for cloned resume:', defaultName)
-    if (!name?.trim()) return
     await flushSave()
-    const cloned = await api.cloneResume(activeResumeId, name.trim())
+    const cloned = await api.cloneResume(activeResumeId, name)
     await handleSwitchResume(cloned.id)
-  }, [activeResumeId, resumes, flushSave, handleSwitchResume])
+  }, [activeResumeId, flushSave, handleSwitchResume])
 
   const handleExportMd = useCallback(() => {
     const active = versions.find((v) => v.id === activeVersionId)
@@ -298,10 +305,8 @@ export default function EditorPage() {
     if (!file) return
     e.target.value = ''
     const text = await file.text()
-    const defaultName = file.name.replace(/\.md$/i, '')
-    const name = window.prompt('Version name:', defaultName)
-    if (!name?.trim()) return
-    const meta = await api.createVersion(name.trim(), text)
+    const name = file.name.replace(/\.md$/i, '')
+    const meta = await api.createVersion(name, text)
     setContent(text)
     initBlocks(text)
     setActiveVersionId(meta.id)
@@ -445,8 +450,16 @@ export default function EditorPage() {
     }
   }
 
+  useEffect(() => {
+    const handler = () => setWindowWidth(window.innerWidth)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+
   const pageBreakHeight = Math.round((11 - margins.top - margins.bottom) * 96)
   const printableWidthPx = Math.round((8.5 - margins.left - margins.right) * 96)
+  const isMobile = windowWidth < 640
+  const previewScale = isMobile ? Math.max(0.3, (windowWidth - 16) / printableWidthPx) : 1
 
   const handleVerticalDividerMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -492,6 +505,7 @@ export default function EditorPage() {
         onNewVersion={handleNewVersion}
         onRenameVersion={handleRenameVersion}
         onDeleteVersion={handleDeleteVersion}
+        onDuplicateVersion={handleDuplicateVersion}
         onExportMd={handleExportMd}
         onImportMd={handleImportMd}
         onImportPdf={handleImportPdf}
@@ -509,8 +523,8 @@ export default function EditorPage() {
       />
 
       {jobContext && (
-        <div className="bg-indigo-950/60 border-b border-indigo-800/50 px-4 py-2 flex items-center justify-between gap-4 shrink-0">
-          <div className="flex items-center gap-2 text-sm">
+        <div className="bg-indigo-950/60 border-b border-indigo-800/50 px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-indigo-300 font-medium">Targeting:</span>
             <span className="text-white">{jobContext.title}</span>
             <span className="text-indigo-400">at {jobContext.company}</span>
@@ -576,7 +590,7 @@ export default function EditorPage() {
             className={`min-w-0 overflow-hidden bg-gray-900 flex flex-col ${
               mobilePane === 'preview' ? 'hidden sm:flex' : 'flex'
             }`}
-            style={{ width: `${editorWidthPct}%` }}
+            style={isMobile ? undefined : { width: `${editorWidthPct}%` }}
           >
             {blockDiff ? (
               <BlockDiffView
@@ -603,11 +617,17 @@ export default function EditorPage() {
 
           {/* Preview pane */}
           <div
-            className={`min-w-0 overflow-auto bg-gray-100 p-6 flex-1 ${
+            className={`min-w-0 overflow-auto bg-gray-100 p-2 sm:p-6 flex-1 ${
               mobilePane === 'editor' ? 'hidden sm:block' : 'block'
             }`}
           >
-            <div className="relative mx-auto" style={{ width: `${printableWidthPx}px` }}>
+            <div
+              className="relative mx-auto"
+              style={{
+                width: `${printableWidthPx}px`,
+                ...(isMobile && previewScale < 1 ? { zoom: previewScale } : {}),
+              }}
+            >
               <BlockResumePreview blocks={previewBlocks} />
               {[1, 2].map((n) => (
                 <div
@@ -627,16 +647,19 @@ export default function EditorPage() {
         </div>
 
         {showChat && (
-          <ChatPanel
-            messages={chatMessages}
-            onMessagesChange={setChatMessages}
-            resume={blocksToMarkdown(blocks)}
-            onRevision={handleRevision}
-            onPatch={handlePatch}
-            onClose={() => setShowChat(false)}
-            height={chatHeight}
-            onHeightChange={setChatHeight}
-          />
+          <div className={isMobile ? 'fixed inset-0 z-40 flex flex-col' : 'contents'}>
+            <ChatPanel
+              messages={chatMessages}
+              onMessagesChange={setChatMessages}
+              resume={blocksToMarkdown(blocks)}
+              onRevision={handleRevision}
+              onPatch={handlePatch}
+              onClose={() => setShowChat(false)}
+              height={chatHeight}
+              onHeightChange={setChatHeight}
+              isMobile={isMobile}
+            />
+          </div>
         )}
       </div>
 
