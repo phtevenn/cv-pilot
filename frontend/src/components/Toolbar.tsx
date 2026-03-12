@@ -1,25 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
 import VersionSelector from './VersionSelector'
-import type { Margins, ResumeMeta, VersionMeta } from '../api/client'
+import SnapshotHistory from './SnapshotHistory'
+import type { Margins, ResumeMeta, Snapshot, VersionMeta } from '../api/client'
 
 // ── Resume selector ──────────────────────────────────────────────────────────
+
+type ResumeAction =
+  | { type: 'none' }
+  | { type: 'creating' }
+  | { type: 'cloning' }
 
 interface ResumeSelectorProps {
   resumes: ResumeMeta[]
   activeResumeId: string | null
   onSwitch: (id: string) => void
-  onNew: () => void
-  onClone: () => void
+  onNew: (name: string) => void
+  onClone: (name: string) => void
 }
 
 function ResumeSelector({ resumes, activeResumeId, onSwitch, onNew, onClone }: ResumeSelectorProps) {
   const [open, setOpen] = useState(false)
+  const [action, setAction] = useState<ResumeAction>({ type: 'none' })
+  const [inputValue, setInputValue] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setAction({ type: 'none' })
+        setInputValue('')
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -28,13 +41,53 @@ function ResumeSelector({ resumes, activeResumeId, onSwitch, onNew, onClone }: R
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        if (action.type !== 'none') {
+          setAction({ type: 'none' })
+          setInputValue('')
+        } else {
+          setOpen(false)
+        }
+      }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open])
+  }, [open, action])
 
-  const label = resumes.find((r) => r.id === activeResumeId)?.name ?? 'Resume'
+  useEffect(() => {
+    if (action.type !== 'none') {
+      setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 0)
+    }
+  }, [action])
+
+  const activeResume = resumes.find((r) => r.id === activeResumeId)
+  const label = activeResume?.name ?? 'Resume'
+
+  const cancel = () => { setAction({ type: 'none' }); setInputValue('') }
+
+  const commitNew = () => {
+    const name = inputValue.trim()
+    if (!name) return
+    onNew(name)
+    setAction({ type: 'none' })
+    setInputValue('')
+    setOpen(false)
+  }
+
+  const commitClone = () => {
+    const name = inputValue.trim()
+    if (!name) return
+    onClone(name)
+    setAction({ type: 'none' })
+    setInputValue('')
+    setOpen(false)
+  }
+
+  const startCloning = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setAction({ type: 'cloning' })
+    setInputValue(activeResume ? `${activeResume.name} (copy)` : 'Copy')
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -43,6 +96,9 @@ function ResumeSelector({ resumes, activeResumeId, onSwitch, onNew, onClone }: R
         className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-medium rounded-lg transition-colors border border-gray-600"
         title="Switch resume"
       >
+        <svg className="w-3 h-3 text-gray-400 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 2h12v12H2zM2 6h12" />
+        </svg>
         <span className="max-w-[100px] truncate">{label}</span>
         <svg className="w-3 h-3 text-gray-400 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 6l4 4 4-4" />
@@ -50,32 +106,68 @@ function ResumeSelector({ resumes, activeResumeId, onSwitch, onNew, onClone }: R
       </button>
 
       {open && (
-        <div className="absolute top-full mt-1 left-0 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 min-w-48">
-          {resumes.map((r) => (
+        <div className="absolute top-full mt-1 left-0 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 w-56 overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">Resumes</span>
             <button
-              key={r.id}
-              onClick={() => { setOpen(false); onSwitch(r.id) }}
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-700 rounded-t-lg transition-colors ${
-                r.id === activeResumeId ? 'text-indigo-400 font-medium' : 'text-gray-200'
-              }`}
+              onClick={(e) => { e.stopPropagation(); setAction({ type: 'creating' }); setInputValue('') }}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
             >
-              {r.name}
-            </button>
-          ))}
-          <div className="border-t border-gray-700 pt-1 pb-1">
-            <button
-              onClick={() => { setOpen(false); onNew() }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
-            >
-              + New Resume
-            </button>
-            <button
-              onClick={() => { setOpen(false); onClone() }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-b-lg transition-colors"
-            >
-              Clone Current
+              + New
             </button>
           </div>
+
+          {/* Resume list */}
+          <div className="max-h-48 overflow-y-auto">
+            {resumes.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => { setOpen(false); onSwitch(r.id) }}
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2 border-b border-gray-700/30 last:border-0 ${
+                  r.id === activeResumeId ? 'text-white font-medium' : 'text-gray-200'
+                }`}
+              >
+                {r.id === activeResumeId && <span className="text-indigo-400 shrink-0 text-[10px]">✓</span>}
+                <span className="truncate">{r.name}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Actions footer */}
+          {action.type === 'none' && (
+            <div className="border-t border-gray-700 px-3 py-2">
+              <button
+                onClick={startCloning}
+                className="w-full text-left text-xs text-gray-400 hover:text-gray-200 transition-colors py-0.5"
+              >
+                Clone current
+              </button>
+            </div>
+          )}
+
+          {/* Inline name inputs */}
+          {(action.type === 'creating' || action.type === 'cloning') && (
+            <div className="border-t border-gray-700 px-3 py-2 flex items-center gap-1.5">
+              <input
+                ref={inputRef}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') action.type === 'creating' ? commitNew() : commitClone()
+                  if (e.key === 'Escape') cancel()
+                }}
+                placeholder={action.type === 'creating' ? 'Resume name…' : 'Clone name…'}
+                className="flex-1 min-w-0 bg-gray-700 text-gray-100 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-gray-500"
+              />
+              <button
+                onClick={() => action.type === 'creating' ? commitNew() : commitClone()}
+                className="text-green-400 hover:text-green-300 px-0.5 shrink-0"
+                title="Confirm"
+              >✓</button>
+              <button onClick={cancel} className="text-gray-500 hover:text-gray-300 px-0.5 shrink-0" title="Cancel">✕</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -121,7 +213,7 @@ function MarginPopover({ margins, onChange }: { margins: Margins; onChange: (m: 
         PDF Margins
       </button>
       {open && (
-        <div className="absolute right-0 top-0 -translate-y-full -mt-1 bg-gray-800 border border-gray-700 rounded-xl p-4 z-50 shadow-xl">
+        <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-xl p-4 z-50 shadow-xl">
           <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-3">Margins (inches)</p>
           <div className="grid grid-cols-2 gap-3">
             {field('Top', 'top')}
@@ -305,9 +397,10 @@ interface ToolbarProps {
   versions: VersionMeta[]
   activeVersionId: string | null
   onSelectVersion: (id: string) => void
-  onNewVersion: () => void
-  onRenameVersion: () => void
-  onDeleteVersion: () => void
+  onNewVersion: (name: string) => void
+  onRenameVersion: (id: string, name: string) => void
+  onDeleteVersion: (id: string) => void
+  onDuplicateVersion: (id: string) => void
   onExportMd: () => void
   onImportMd: React.ChangeEventHandler<HTMLInputElement>
   onImportPdf: React.ChangeEventHandler<HTMLInputElement>
@@ -320,8 +413,10 @@ interface ToolbarProps {
   resumes: ResumeMeta[]
   activeResumeId: string | null
   onSwitchResume: (id: string) => void
-  onNewResume: () => void
-  onCloneResume: () => void
+  onNewResume: (name: string) => void
+  onCloneResume: (name: string) => void
+  snapshots: Snapshot[]
+  onRestoreSnapshot: (id: string) => void
 }
 
 export default function Toolbar({
@@ -336,6 +431,7 @@ export default function Toolbar({
   onNewVersion,
   onRenameVersion,
   onDeleteVersion,
+  onDuplicateVersion,
   onExportMd,
   onImportMd,
   onImportPdf,
@@ -350,6 +446,8 @@ export default function Toolbar({
   onSwitchResume,
   onNewResume,
   onCloneResume,
+  snapshots,
+  onRestoreSnapshot,
 }: ToolbarProps) {
   const saveStatus = saving ? (
     <span className="text-gray-500 text-xs">Saving…</span>
@@ -378,7 +476,7 @@ export default function Toolbar({
           onSwitch={onSwitchResume}
           onNew={onNewResume}
           onClone={onCloneResume}
-        />
+          />
         <VersionSelector
           versions={versions}
           activeVersionId={activeVersionId}
@@ -386,6 +484,11 @@ export default function Toolbar({
           onNew={onNewVersion}
           onRename={onRenameVersion}
           onDelete={onDeleteVersion}
+          onDuplicate={onDuplicateVersion}
+        />
+        <SnapshotHistory
+          snapshots={snapshots}
+          onRestore={onRestoreSnapshot}
         />
         <span className="hidden sm:inline">{saveStatus}</span>
       </div>

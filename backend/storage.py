@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from database import Application, ResumeDoc, ResumeVersion, UserMeta, get_engine
+from database import Application, ResumeDoc, ResumeSnapshot, ResumeVersion, UserMeta, get_engine
 
 SAMPLE_RESUME = """\
 **STEPHEN YU**
@@ -533,6 +533,90 @@ def delete_application(user_id: str, app_id: str) -> bool:
         if app is None:
             return False
         session.delete(app)
+        session.commit()
+        return True
+
+
+_SNAPSHOT_LIMIT = 20
+
+
+def create_snapshot(user_id: str, label: str) -> dict:
+    """Snapshot current active version content. Prunes oldest beyond SNAPSHOT_LIMIT."""
+    active_id = get_active_version_id(user_id)
+    if not active_id:
+        raise ValueError("No active version")
+    content = load_version(user_id, active_id)
+    if not content:
+        raise ValueError("No content to snapshot")
+    now = _now()
+    snap_id = str(uuid.uuid4())
+    with Session(get_engine()) as session:
+        snap = ResumeSnapshot(
+            id=snap_id,
+            user_id=user_id,
+            version_id=active_id,
+            content=content,
+            label=label,
+            created_at=now,
+        )
+        session.add(snap)
+        # Prune: delete oldest beyond limit
+        stmt = (
+            select(ResumeSnapshot)
+            .where(ResumeSnapshot.user_id == user_id)
+            .where(ResumeSnapshot.version_id == active_id)
+            .order_by(ResumeSnapshot.created_at.desc())
+            .offset(_SNAPSHOT_LIMIT)
+        )
+        for old in session.exec(stmt).all():
+            session.delete(old)
+        session.commit()
+        session.refresh(snap)
+        return {"id": snap.id, "version_id": snap.version_id, "label": snap.label, "created_at": snap.created_at}
+
+
+def list_snapshots(user_id: str) -> list[dict]:
+    """List snapshots for the active version, newest first."""
+    active_id = get_active_version_id(user_id)
+    if not active_id:
+        return []
+    with Session(get_engine()) as session:
+        stmt = (
+            select(ResumeSnapshot)
+            .where(ResumeSnapshot.user_id == user_id)
+            .where(ResumeSnapshot.version_id == active_id)
+            .order_by(ResumeSnapshot.created_at.desc())
+            .limit(_SNAPSHOT_LIMIT)
+        )
+        snaps = session.exec(stmt).all()
+        return [{"id": s.id, "version_id": s.version_id, "label": s.label, "created_at": s.created_at} for s in snaps]
+
+
+def restore_snapshot(user_id: str, snapshot_id: str) -> Optional[str]:
+    """Restore snapshot content into the active version. Auto-snapshots current state first.
+    Returns the restored content, or None if snapshot not found."""
+    with Session(get_engine()) as session:
+        snap = session.get(ResumeSnapshot, snapshot_id)
+        if snap is None or snap.user_id != user_id:
+            return None
+        restored_content = snap.content
+    # Auto-snapshot current state so user can undo the restore
+    try:
+        create_snapshot(user_id, "Before Restore")
+    except ValueError:
+        pass
+    active_id = get_active_version_id(user_id)
+    if active_id:
+        save_version(user_id, active_id, content=restored_content)
+    return restored_content
+
+
+def delete_snapshot(user_id: str, snapshot_id: str) -> bool:
+    with Session(get_engine()) as session:
+        snap = session.get(ResumeSnapshot, snapshot_id)
+        if snap is None or snap.user_id != user_id:
+            return False
+        session.delete(snap)
         session.commit()
         return True
 

@@ -40,6 +40,10 @@ class SetActiveResume(BaseModel):
     resume_id: str
 
 
+class SnapshotCreate(BaseModel):
+    label: str
+
+
 # ---------------------------------------------------------------------------
 # Resume-level endpoints (named resume docs)
 # ---------------------------------------------------------------------------
@@ -78,6 +82,49 @@ async def set_active_resume(
     ok = storage.set_active_resume(user["sub"], body.resume_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Resume not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Snapshot endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/snapshots")
+async def list_snapshots(user: dict = Depends(get_current_user)) -> list:
+    return storage.list_snapshots(user["sub"])
+
+
+@router.post("/snapshots")
+async def create_snapshot(
+    body: SnapshotCreate,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return storage.create_snapshot(user["sub"], body.label.strip() or "AI Edit")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/snapshots/{snapshot_id}/restore")
+async def restore_snapshot(
+    snapshot_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    content = storage.restore_snapshot(user["sub"], snapshot_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return {"ok": True, "content": content}
+
+
+@router.delete("/snapshots/{snapshot_id}")
+async def delete_snapshot(
+    snapshot_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    ok = storage.delete_snapshot(user["sub"], snapshot_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
     return {"ok": True}
 
 

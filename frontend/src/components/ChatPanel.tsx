@@ -19,6 +19,7 @@ interface ChatPanelProps {
   onClose: () => void
   height: number
   onHeightChange: (h: number) => void
+  isMobile?: boolean
 }
 
 function AssistantMessage({
@@ -96,6 +97,7 @@ export default function ChatPanel({
   onClose,
   height,
   onHeightChange,
+  isMobile = false,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -164,12 +166,14 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="flex flex-col border-t border-gray-700 bg-gray-900 shrink-0" style={{ height: `${height}px` }}>
+    <div className={`flex flex-col bg-gray-900 ${isMobile ? 'flex-1 min-h-0' : 'border-t border-gray-700 shrink-0'}`} style={isMobile ? undefined : { height: `${height}px` }}>
       {/* Resize handle */}
-      <div
-        onMouseDown={handleResizeMouseDown}
-        className="h-1 shrink-0 cursor-row-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
-      />
+      {!isMobile && (
+        <div
+          onMouseDown={handleResizeMouseDown}
+          className="h-1 shrink-0 cursor-row-resize bg-gray-700 hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
+        />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 shrink-0">
         <span className="text-white text-sm font-medium">✦ Resume AI</span>
@@ -242,7 +246,7 @@ export default function ChatPanel({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={streaming}
-          placeholder="Ask about your resume… (Enter to send, Shift+Enter for newline)"
+          placeholder={isMobile ? 'Ask about your resume…' : 'Ask about your resume… (Enter to send, Shift+Enter for newline)'}
           rows={2}
           className="flex-1 resize-none bg-gray-800 text-gray-100 text-xs rounded-lg px-3 py-2 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
         />
