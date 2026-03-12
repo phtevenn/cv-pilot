@@ -59,6 +59,13 @@ export interface ResumeMeta {
   is_active: boolean
 }
 
+export interface Snapshot {
+  id: string
+  version_id: string
+  label: string
+  created_at: string
+}
+
 export type ApplicationStatus = 'applied' | 'interview' | 'offer' | 'rejected' | 'withdrawn'
 
 export interface Application {
@@ -246,6 +253,22 @@ export const api = {
 
   deleteApplication: (id: string) =>
     request<{ ok: boolean }>(`/api/applications/${id}`, { method: 'DELETE' }),
+
+  listSnapshots: () => request<Snapshot[]>('/api/resume/snapshots'),
+
+  createSnapshot: (body: { label: string }) =>
+    request<Snapshot>('/api/resume/snapshots', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  restoreSnapshot: (id: string) =>
+    request<{ ok: boolean; content: string }>(`/api/resume/snapshots/${id}/restore`, {
+      method: 'POST',
+    }),
+
+  deleteSnapshot: (id: string) =>
+    request<{ ok: boolean }>(`/api/resume/snapshots/${id}`, { method: 'DELETE' }),
 
   searchJobs: (params: {
     job_titles: string[]

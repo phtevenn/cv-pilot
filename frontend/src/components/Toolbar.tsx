@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import VersionSelector from './VersionSelector'
-import type { Margins, ResumeMeta, VersionMeta } from '../api/client'
+import SnapshotHistory from './SnapshotHistory'
+import type { Margins, ResumeMeta, Snapshot, VersionMeta } from '../api/client'
 
 // ── Resume selector ──────────────────────────────────────────────────────────
 
@@ -414,6 +415,8 @@ interface ToolbarProps {
   onSwitchResume: (id: string) => void
   onNewResume: (name: string) => void
   onCloneResume: (name: string) => void
+  snapshots: Snapshot[]
+  onRestoreSnapshot: (id: string) => void
 }
 
 export default function Toolbar({
@@ -443,6 +446,8 @@ export default function Toolbar({
   onSwitchResume,
   onNewResume,
   onCloneResume,
+  snapshots,
+  onRestoreSnapshot,
 }: ToolbarProps) {
   const saveStatus = saving ? (
     <span className="text-gray-500 text-xs">Saving…</span>
@@ -480,6 +485,10 @@ export default function Toolbar({
           onRename={onRenameVersion}
           onDelete={onDeleteVersion}
           onDuplicate={onDuplicateVersion}
+        />
+        <SnapshotHistory
+          snapshots={snapshots}
+          onRestore={onRestoreSnapshot}
         />
         <span className="hidden sm:inline">{saveStatus}</span>
       </div>

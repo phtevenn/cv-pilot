@@ -11,7 +11,7 @@ import BlockEditor from '../components/BlockEditor'
 import BlockResumePreview from '../components/BlockResumePreview'
 import BlockDiffView from '../components/BlockDiffView'
 import { api, DEFAULT_MARGINS } from '../api/client'
-import type { ChatMessage, Margins, ResumeMeta, VersionMeta } from '../api/client'
+import type { ChatMessage, Margins, ResumeMeta, Snapshot, VersionMeta } from '../api/client'
 import {
   computeBlockDiff,
   resolveBlockDiff,
@@ -63,6 +63,7 @@ export default function EditorPage() {
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [resumes, setResumes] = useState<ResumeMeta[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [blockDiff, setBlockDiff] = useState<BlockDiffEntry[] | null>(null)
   const [diffApplied, setDiffApplied] = useState(false)
   const [showChat, setShowChat] = useState(false)
@@ -113,8 +114,8 @@ export default function EditorPage() {
   }
 
   useEffect(() => {
-    Promise.all([api.getResume(), api.listVersions(), api.listResumes()])
-      .then(([resume, vers, resumeList]) => {
+    Promise.all([api.getResume(), api.listVersions(), api.listResumes(), api.listSnapshots()])
+      .then(([resume, vers, resumeList, snaps]) => {
         setContent(resume.content)
         initBlocks(resume.content)
         setVersions(vers)
@@ -123,6 +124,7 @@ export default function EditorPage() {
         setResumes(resumeList)
         const activeResume = resumeList.find((r) => r.is_active)
         if (activeResume) setActiveResumeId(activeResume.id)
+        setSnapshots(snaps)
         setBlocksLoaded(true)
       })
       .catch((e: unknown) => console.error('Failed to load resume:', e))
@@ -202,6 +204,8 @@ export default function EditorPage() {
       setActiveVersionId(id)
       const vers = await api.listVersions()
       setVersions(vers)
+      const snaps = await api.listSnapshots()
+      setSnapshots(snaps)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeVersionId, flushSave],
@@ -339,9 +343,13 @@ export default function EditorPage() {
 
   // ── Block diff handlers ───────────────────────────────────────────────────
 
-  const openDiff = useCallback((entries: BlockDiffEntry[]) => {
+  const openDiff = useCallback((entries: BlockDiffEntry[], label = 'Before AI Edit') => {
     setDiffApplied(false)
     setBlockDiff(entries)
+    api.createSnapshot({ label })
+      .then(() => api.listSnapshots())
+      .then(setSnapshots)
+      .catch(() => {})
   }, [])
 
   const closeDiff = useCallback(() => {
@@ -349,21 +357,38 @@ export default function EditorPage() {
     setDiffApplied(false)
   }, [])
 
-  const handleRevision = useCallback((revised: string) => {
+  const handleRevision = useCallback((revised: string, label = 'Before Chat Edit') => {
     const revisedBlocks = deserializeBlocks(revised)
     const normalised = revisedBlocks.length > 0 ? revisedBlocks : migrateMarkdownToBlocks(revised)
     const entries = computeBlockDiff(blocksRef.current, normalised)
     if (countBlockDiffTotal(entries) === 0) return
-    openDiff(entries)
+    openDiff(entries, label)
   }, [openDiff])
 
-  const handlePatch = useCallback((patchMarkdown: string) => {
+  const handlePatch = useCallback((patchMarkdown: string, label = 'Before Chat Edit') => {
     const patchBlocks = parsePatchBlocks(patchMarkdown)
     const revisedBlocks = applyPatch(blocksRef.current, patchBlocks)
     const entries = computeBlockDiff(blocksRef.current, revisedBlocks)
     if (countBlockDiffTotal(entries) === 0) return
-    openDiff(entries)
+    openDiff(entries, label)
   }, [openDiff])
+
+  const handleOptimizeRevision = useCallback((revised: string) => {
+    handleRevision(revised, 'Before Optimize')
+  }, [handleRevision])
+
+  const handleRestoreSnapshot = useCallback(async (id: string) => {
+    try {
+      const result = await api.restoreSnapshot(id)
+      setContent(result.content)
+      initBlocks(result.content)
+      const snaps = await api.listSnapshots()
+      setSnapshots(snaps)
+    } catch (e) {
+      console.error('Failed to restore snapshot', e)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleAcceptBlock = useCallback((id: string) => {
     setBlockDiff((prev) =>
@@ -520,6 +545,8 @@ export default function EditorPage() {
         onSwitchResume={handleSwitchResume}
         onNewResume={handleNewResume}
         onCloneResume={handleCloneResume}
+        snapshots={snapshots}
+        onRestoreSnapshot={handleRestoreSnapshot}
       />
 
       {jobContext && (
@@ -678,7 +705,7 @@ export default function EditorPage() {
         <OptimizeModal
           resumeContent={blocksToMarkdown(blocks)}
           onClose={() => setShowOptimize(false)}
-          onRevision={handleRevision}
+          onRevision={handleOptimizeRevision}
           initialJobDescription={prefillJob || undefined}
         />
       )}

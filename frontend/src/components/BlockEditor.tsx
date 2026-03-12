@@ -7,6 +7,7 @@ import {
   DndContext,
   closestCenter,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
@@ -113,7 +114,7 @@ function SortableBlockCard({
         <div
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 select-none flex-shrink-0"
+          className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 select-none flex-shrink-0 p-1 -m-1 touch-none"
           title="Drag to reorder"
         >
           <svg
@@ -190,8 +191,8 @@ function SortableBlockCard({
           extensions={[markdown({ base: markdownLanguage, codeLanguages: languages })]}
           theme={oneDark}
           height="auto"
-          minHeight="80px"
-          maxHeight="400px"
+          minHeight="60px"
+          maxHeight="300px"
           onChange={(value: string) => onChangeContent(block.id, value)}
           basicSetup={{
             lineNumbers: false,
@@ -254,7 +255,12 @@ export default function BlockEditor({ blocks, onChange }: BlockEditorProps) {
   const [showAddDropdown, setShowAddDropdown] = useState(false)
   const addButtonRef = useRef<HTMLDivElement>(null)
 
-  const sensors = useSensors(useSensor(PointerSensor))
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 8 },
+    }),
+  )
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event

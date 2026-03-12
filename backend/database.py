@@ -102,3 +102,14 @@ class Application(SQLModel, table=True):
     notes: str = Field(default="")
     applied_at: str
     updated_at: str
+
+
+class ResumeSnapshot(SQLModel, table=True):
+    __tablename__ = "resume_snapshots"
+
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    version_id: str = Field(index=True)
+    content: str = Field(default="")
+    label: str = Field(default="")
+    created_at: str
