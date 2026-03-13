@@ -196,7 +196,20 @@ Write the summary as 1–2 concise sentences only. No bullet points, no long par
 6. CONTENT: Strengthen bullet points with impact-driven language and keywords from the job description. \
 Do not invent experience or credentials not present in the original.
 7. LENGTH: The revised resume MUST fit within {page_limit} page{page_limit_plural}. \
-Trim less-relevant bullet points or shorten descriptions as needed — do NOT remove entire sections.\
+Trim less-relevant bullet points or shorten descriptions as needed — do NOT remove entire sections.
+8. ENTRY FORMAT: For each EXPERIENCE / WORK / PROJECT / EDUCATION item, use this exact markdown shape:
+   - First line: a single entry-heading line with the organization, school, or project name and the dates.
+   - Bold the organization/project/school name and bold the date segment.
+   - Keep the heading on one line using ` | ` or ` • ` separators when needed.
+   - Second line: the role, degree, or subtitle as plain text on its own line.
+   - Then use `* ` bullets for accomplishments, if bullets exist for that item.
+   Example:
+   **OpenAI** • **2023 - Present**
+   Senior Research Engineer
+9. SKILLS FORMAT: In **SKILLS** or equivalent sections, write each skill group on its own line as \
+`Label: item, item, item`. Do not use bullets, tables, or multi-line wrapped categories.
+10. MARKDOWN DISCIPLINE: Do not use markdown tables, code fences, numbered lists, nested bullets, or \
+ATX headings like `#` / `##` for sections. Keep the markdown simple and formatter-friendly.\
 """
 
 
