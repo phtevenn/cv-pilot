@@ -1,5 +1,4 @@
 import json
-import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,7 +9,15 @@ from sqlmodel import Session, select
 
 from database import GDocCategory, GDocResume, get_engine
 from deps import get_current_user
-from gdocs_client import create_google_doc_from_html, has_drive_access
+from gdocs_client import (
+    create_doc_in_folder,
+    delete_drive_file,
+    get_folder_id,
+    get_or_create_folder,
+    has_drive_access,
+    list_docs_in_folder,
+    rename_drive_file,
+)
 from llm_client import get_client
 from anthropic import AsyncAnthropic
 
@@ -89,20 +96,65 @@ async def delete_category(cat_id: str, user: dict = Depends(get_current_user)) -
 
 
 # ---------------------------------------------------------------------------
-# GDoc Resumes
+# Folder
 # ---------------------------------------------------------------------------
 
-def _resume_to_dict(r: GDocResume) -> dict:
+@router.get("/folder")
+async def get_folder(user: dict = Depends(get_current_user)) -> dict:
+    """Return (creating if needed) the CV Pilot Drive folder info."""
+    if not has_drive_access(user["sub"]):
+        raise HTTPException(status_code=403, detail="Google Drive not connected")
+    folder_id = await get_or_create_folder(user["sub"])
     return {
-        "id": r.id,
-        "google_doc_id": r.google_doc_id,
-        "title": r.title,
-        "category_id": r.category_id,
-        "google_doc_url": f"https://docs.google.com/document/d/{r.google_doc_id}/edit",
-        "preview_url": f"https://docs.google.com/document/d/{r.google_doc_id}/preview",
-        "created_at": r.created_at,
-        "updated_at": r.updated_at,
+        "folder_id": folder_id,
+        "folder_url": f"https://drive.google.com/drive/folders/{folder_id}",
     }
+
+
+# ---------------------------------------------------------------------------
+# GDoc Resumes — Drive is source of truth, SQLite stores only category tags
+# ---------------------------------------------------------------------------
+
+def _drive_file_to_dict(f: dict, category_id: Optional[str]) -> dict:
+    doc_id = f["id"]
+    return {
+        "id": doc_id,
+        "google_doc_id": doc_id,
+        "title": f.get("name", "Untitled"),
+        "category_id": category_id,
+        "google_doc_url": f.get("webViewLink", f"https://docs.google.com/document/d/{doc_id}/edit"),
+        "preview_url": f"https://docs.google.com/document/d/{doc_id}/preview",
+        "created_at": f.get("createdTime", ""),
+        "updated_at": f.get("modifiedTime", ""),
+    }
+
+
+def _load_category_map(user_id: str) -> dict[str, Optional[str]]:
+    """Return {google_doc_id: category_id} from SQLite metadata."""
+    with Session(get_engine()) as session:
+        stmt = select(GDocResume).where(GDocResume.user_id == user_id)
+        return {r.google_doc_id: r.category_id for r in session.exec(stmt).all()}
+
+
+def _upsert_category(user_id: str, google_doc_id: str, category_id: Optional[str]) -> None:
+    """Store or update the category tag for a doc in SQLite."""
+    with Session(get_engine()) as session:
+        r = session.get(GDocResume, google_doc_id)
+        if r is None:
+            r = GDocResume(
+                id=google_doc_id,
+                user_id=user_id,
+                google_doc_id=google_doc_id,
+                title="",
+                category_id=category_id,
+                created_at=_now(),
+                updated_at=_now(),
+            )
+        else:
+            r.category_id = category_id
+            r.updated_at = _now()
+        session.add(r)
+        session.commit()
 
 
 @router.get("/resumes")
@@ -110,12 +162,15 @@ async def list_resumes(
     user: dict = Depends(get_current_user),
     category_id: Optional[str] = None,
 ) -> dict:
-    with Session(get_engine()) as session:
-        stmt = select(GDocResume).where(GDocResume.user_id == user["sub"])
-        if category_id:
-            stmt = stmt.where(GDocResume.category_id == category_id)
-        resumes = session.exec(stmt.order_by(GDocResume.created_at.desc())).all()
-        return {"resumes": [_resume_to_dict(r) for r in resumes]}
+    if not has_drive_access(user["sub"]):
+        raise HTTPException(status_code=403, detail="Google Drive not connected")
+    folder_id = await get_or_create_folder(user["sub"])
+    drive_files = await list_docs_in_folder(user["sub"], folder_id)
+    cat_map = _load_category_map(user["sub"])
+    resumes = [_drive_file_to_dict(f, cat_map.get(f["id"])) for f in drive_files]
+    if category_id:
+        resumes = [r for r in resumes if r["category_id"] == category_id]
+    return {"resumes": resumes}
 
 
 # System prompt reused from llm.py logic
@@ -213,50 +268,37 @@ async def generate_resume(
         # Convert markdown → HTML
         html_content = md_lib.markdown(full_markdown, extensions=["extra"])
 
-        # Create Google Doc
+        # Get/create the CV Pilot folder and create the doc inside it
         try:
-            doc_data = await create_google_doc_from_html(user["sub"], title, html_content)
+            folder_id = await get_or_create_folder(user["sub"])
+            doc_data = await create_doc_in_folder(user["sub"], title, html_content, folder_id)
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
         google_doc_id = doc_data["id"]
-        now = _now()
-        resume_id = str(uuid.uuid4())
 
-        # Persist to DB
-        with Session(get_engine()) as session:
-            # Validate category_id belongs to user
-            if category_id:
+        # Validate and persist category tag
+        valid_cat: Optional[str] = None
+        if category_id:
+            with Session(get_engine()) as session:
                 cat = session.get(GDocCategory, category_id)
-                valid_cat = category_id if (cat and cat.user_id == user["sub"]) else None
-            else:
-                valid_cat = None
-
-            gdoc_resume = GDocResume(
-                id=resume_id,
-                user_id=user["sub"],
-                category_id=valid_cat,
-                google_doc_id=google_doc_id,
-                title=title,
-                job_description=job_description[:2000],  # trim for storage
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(gdoc_resume)
-            session.commit()
+                if cat and cat.user_id == user["sub"]:
+                    valid_cat = category_id
+        if valid_cat is not None:
+            _upsert_category(user["sub"], google_doc_id, valid_cat)
 
         result = {
             "status": "done",
-            "id": resume_id,
+            "id": google_doc_id,
             "google_doc_id": google_doc_id,
             "title": title,
             "category_id": valid_cat,
-            "google_doc_url": f"https://docs.google.com/document/d/{google_doc_id}/edit",
+            "google_doc_url": doc_data.get("webViewLink", f"https://docs.google.com/document/d/{google_doc_id}/edit"),
             "preview_url": f"https://docs.google.com/document/d/{google_doc_id}/preview",
-            "created_at": now,
-            "updated_at": now,
+            "created_at": doc_data.get("createdTime", _now()),
+            "updated_at": doc_data.get("modifiedTime", _now()),
         }
         yield f"data: {json.dumps(result)}\n\n"
         yield "data: [DONE]\n\n"
@@ -268,29 +310,42 @@ async def generate_resume(
     )
 
 
-@router.patch("/resumes/{resume_id}")
-async def update_resume(resume_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+@router.patch("/resumes/{doc_id}")
+async def update_resume(doc_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    """Rename in Drive and/or update category in SQLite."""
     body = await request.json()
-    with Session(get_engine()) as session:
-        r = session.get(GDocResume, resume_id)
-        if r is None or r.user_id != user["sub"]:
-            raise HTTPException(status_code=404, detail="Resume not found")
-        if "title" in body and body["title"].strip():
-            r.title = body["title"].strip()
-        if "category_id" in body:
-            r.category_id = body["category_id"] or None
-        r.updated_at = _now()
-        session.add(r)
-        session.commit()
-        session.refresh(r)
-        return _resume_to_dict(r)
+    new_title: Optional[str] = body.get("title", "").strip() or None
+    new_category: Optional[str] = body.get("category_id", "UNSET")  # sentinel to detect omission
+
+    if new_title:
+        await rename_drive_file(user["sub"], doc_id, new_title)
+
+    if new_category != "UNSET":
+        _upsert_category(user["sub"], doc_id, new_category or None)
+
+    # Return updated metadata from Drive
+    from gdocs_client import _get_valid_access_token
+    import httpx
+    access_token = await _get_valid_access_token(user["sub"])
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://www.googleapis.com/drive/v3/files/{doc_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"fields": "id,name,webViewLink,createdTime,modifiedTime"},
+        )
+        resp.raise_for_status()
+        f = resp.json()
+
+    cat_map = _load_category_map(user["sub"])
+    return _drive_file_to_dict(f, cat_map.get(doc_id))
 
 
-@router.delete("/resumes/{resume_id}", status_code=204)
-async def delete_resume(resume_id: str, user: dict = Depends(get_current_user)) -> None:
+@router.delete("/resumes/{doc_id}", status_code=204)
+async def delete_resume(doc_id: str, user: dict = Depends(get_current_user)) -> None:
+    """Delete from Drive and remove category metadata from SQLite."""
+    await delete_drive_file(user["sub"], doc_id)
     with Session(get_engine()) as session:
-        r = session.get(GDocResume, resume_id)
-        if r is None or r.user_id != user["sub"]:
-            raise HTTPException(status_code=404, detail="Resume not found")
-        session.delete(r)
-        session.commit()
+        r = session.get(GDocResume, doc_id)
+        if r and r.user_id == user["sub"]:
+            session.delete(r)
+            session.commit()

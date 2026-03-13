@@ -17,7 +17,7 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_SCOPES = ["openid", "email", "profile"]
-GOOGLE_DRIVE_SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"]
+GOOGLE_DRIVE_SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/drive"]
 
 
 def get_google_auth_url(state: str, redirect_uri: str) -> str:

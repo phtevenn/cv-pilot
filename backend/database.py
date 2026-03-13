@@ -46,9 +46,14 @@ def _run_migrations(engine) -> None:
                 "user_id TEXT PRIMARY KEY, "
                 "access_token TEXT NOT NULL, "
                 "refresh_token TEXT, "
-                "token_expiry TEXT"
+                "token_expiry TEXT, "
+                "folder_id TEXT"
                 ")"
             ))
+        else:
+            cols = {c["name"] for c in inspector.get_columns("user_google_tokens")}
+            if "folder_id" not in cols:
+                conn.execute(text("ALTER TABLE user_google_tokens ADD COLUMN folder_id TEXT"))
         if "gdoc_categories" not in existing_tables:
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS gdoc_categories ("
@@ -159,6 +164,7 @@ class UserGoogleToken(SQLModel, table=True):
     access_token: str
     refresh_token: Optional[str] = Field(default=None)
     token_expiry: Optional[str] = Field(default=None)  # ISO datetime
+    folder_id: Optional[str] = Field(default=None)     # CV Pilot Drive folder
 
 
 class GDocCategory(SQLModel, table=True):
