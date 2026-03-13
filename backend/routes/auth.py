@@ -64,7 +64,7 @@ async def callback(
     # than the backend (local dev: backend=:8000, frontend=:5173).
     # In Docker the nginx proxy serves both from the same origin, so we can
     # derive the frontend URL from the request instead.
-    frontend_base = FRONTEND_URL if FRONTEND_URL else public_base
+    frontend_base = FRONTEND_URL if FRONTEND_URL else _public_base(request)
     return RedirectResponse(url=f"{frontend_base}/auth/callback?token={jwt_token}")
 
 
