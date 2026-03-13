@@ -200,35 +200,82 @@ def _inline_md_to_html(text: str) -> str:
     """Convert inline markdown bold/italic to HTML, HTML-escaping the rest."""
     result = []
     remaining = text
-    bold_pat = _re.compile(r'\*\*(.+?)\*\*')
+    inline_pat = _re.compile(r'(\*\*(.+?)\*\*|_(.+?)_|\*(.+?)\*)')
     while True:
-        m = bold_pat.search(remaining)
+        m = inline_pat.search(remaining)
         if not m:
             result.append(_html.escape(remaining))
             break
         result.append(_html.escape(remaining[:m.start()]))
-        result.append(f'<strong>{_html.escape(m.group(1))}</strong>')
+        if m.group(2) is not None:
+            result.append(f'<strong>{_html.escape(m.group(2))}</strong>')
+        else:
+            italic_text = m.group(3) if m.group(3) is not None else m.group(4)
+            result.append(f'<em>{_html.escape(italic_text)}</em>')
         remaining = remaining[m.end():]
     return ''.join(result)
+
+
+def _normalize_section_name(section_name: str) -> str:
+    return _re.sub(r'[^a-z]+', '', section_name.lower())
+
+
+def _is_contact_line(text: str) -> bool:
+    return (
+        "|" in text
+        or "@" in text
+        or bool(_re.search(r"\d{3}[-.)]\d{3}", text))
+        or bool(_re.search(r"linkedin|github|portfolio|http", text, _re.I))
+    )
+
+
+def _looks_like_entry_heading(text: str) -> bool:
+    plain = _strip_inline_bold(text)
+    return bool(
+        _re.search(r"\b(?:19|20)\d{2}\b", plain)
+        or _re.search(r"\b(?:present|current)\b", plain, _re.I)
+        or "•" in plain
+        or " | " in plain
+    )
+
+
+def _format_skill_line(text: str) -> str:
+    match = _re.match(r"^([^:]{2,32}):\s+(.+)$", text)
+    if not match:
+        return _inline_md_to_html(text)
+    label, value = match.groups()
+    return (
+        f'<strong class="skill-label">{_html.escape(label.strip())}:</strong> '
+        f'<span class="skill-value">{_inline_md_to_html(value.strip())}</span>'
+    )
 
 
 def markdown_to_resume_html(markdown_text: str) -> str:
     """Convert Claude's resume markdown to styled HTML suitable for Google Docs import."""
     CSS = """
 @page { margin: 0.75in; }
-body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #000; line-height: 1.35; margin: 0; }
-.rn { font-size: 18pt; font-weight: bold; text-align: center; margin: 0 0 3pt 0; }
-.rc { font-size: 10pt; text-align: center; color: #444; margin: 0 0 10pt 0; }
-.rs { font-size: 11pt; font-weight: bold; border-bottom: 1.5pt solid #222; margin: 10pt 0 3pt 0; padding-bottom: 2pt; letter-spacing: 0.03em; }
-.rr { font-size: 10.5pt; margin: 4pt 0 1pt 0; }
-ul { margin: 1pt 0 4pt 0; padding-left: 16pt; }
-li { font-size: 10.5pt; margin-bottom: 1.5pt; }
+body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #16202a; line-height: 1.35; margin: 0; }
+.rn { font-size: 20pt; font-weight: 700; text-align: center; letter-spacing: 0.04em; color: #183153; margin: 0 0 4pt 0; text-transform: uppercase; }
+.rc { font-size: 9.5pt; text-align: center; color: #506070; margin: 0 0 12pt 0; }
+.rs { font-size: 10.5pt; font-weight: 700; color: #214e72; border-bottom: 1.5pt solid #7ba4c8; margin: 11pt 0 4pt 0; padding-bottom: 2pt; letter-spacing: 0.08em; }
+.entry { font-size: 10.5pt; margin: 5pt 0 1pt 0; color: #10212f; }
+.entry strong { color: #17324d; }
+.role { font-size: 10pt; font-style: italic; color: #315d7a; margin: 0 0 2pt 0; }
+.skills { margin: 0 0 4pt 0; }
+.skill-label { color: #214e72; }
+.skill-value { color: #16202a; }
+ul { margin: 1pt 0 6pt 0; padding-left: 16pt; }
+li { font-size: 10.5pt; margin-bottom: 2pt; }
 p { margin: 0 0 3pt 0; font-size: 10.5pt; }
+strong { font-weight: 700; }
+em { color: #315d7a; }
 """
     lines = markdown_text.strip().split('\n')
     parts: list[str] = []
     in_ul = False
     header_done = False  # True once we've seen the first section header
+    current_section = ""
+    last_line_was_entry = False
 
     def close_ul() -> None:
         nonlocal in_ul
@@ -265,6 +312,8 @@ p { margin: 0 0 3pt 0; font-size: 10.5pt; }
         sec_match = _re.match(r'^\*\*([A-Z][A-Z0-9 /&()\-]+)\*\*\s*$', s)
         if sec_match:
             close_ul()
+            current_section = _normalize_section_name(sec_match.group(1))
+            last_line_was_entry = False
             parts.append(f'<p class="rs">{_html.escape(sec_match.group(1))}</p>')
             header_done = True
             continue
@@ -274,16 +323,13 @@ p { margin: 0 0 3pt 0; font-size: 10.5pt; }
             open_ul()
             text = _re.sub(r'^[-*•]\s+', '', s)
             parts.append(f'<li>{_inline_md_to_html(text)}</li>')
+            last_line_was_entry = False
             continue
 
         close_ul()
 
         # Contact info: in the header block and contains | or @ or phone pattern
-        if not header_done and (
-            '|' in s or '@' in s
-            or _re.search(r'\d{3}[-.)]\d{3}', s)
-            or _re.search(r'linkedin|github|http', s, _re.I)
-        ):
+        if not header_done and _is_contact_line(s):
             pieces = [p.strip() for p in s.split('|')]
             contact_html = ' • '.join(_html.escape(p) for p in pieces if p)
             parts.append(f'<p class="rc">{contact_html}</p>')
@@ -302,13 +348,30 @@ p { margin: 0 0 3pt 0; font-size: 10.5pt; }
                 name_seen = True
                 continue
 
+        if current_section in {"experience", "workexperience", "professionalexperience", "researchexperience", "projects", "education"} and _looks_like_entry_heading(s):
+            parts.append(f'<p class="entry">{_inline_md_to_html(s)}</p>')
+            last_line_was_entry = True
+            continue
+
+        if last_line_was_entry and current_section in {"experience", "workexperience", "professionalexperience", "researchexperience", "projects", "education"}:
+            parts.append(f'<p class="role">{_inline_md_to_html(s)}</p>')
+            last_line_was_entry = False
+            continue
+
+        if current_section in {"skills", "technicalskills", "corecompetencies", "competencies"}:
+            parts.append(f'<p class="skills">{_format_skill_line(s)}</p>')
+            last_line_was_entry = False
+            continue
+
         # Role/subheading lines (have bold or pipe separator after header block)
         if _re.search(r'\*\*', s) or ('|' in s and header_done):
-            parts.append(f'<p class="rr">{_inline_md_to_html(s)}</p>')
+            parts.append(f'<p class="entry">{_inline_md_to_html(s)}</p>')
+            last_line_was_entry = False
             continue
 
         # Default body paragraph
         parts.append(f'<p>{_inline_md_to_html(s)}</p>')
+        last_line_was_entry = False
 
     close_ul()
     content = '\n'.join(parts)
