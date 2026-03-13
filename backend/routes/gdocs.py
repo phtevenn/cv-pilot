@@ -241,7 +241,9 @@ async def generate_resume(
     user_message = f"## Resume\n\n{base_resume}\n\n## Job Description\n\n{job_description}"
 
     async def event_stream():
-        yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating tailored resume with AI\u2026'})}\n\n"
+        yield "data: " + json.dumps(
+            {"status": "generating", "message": "Generating tailored resume with AI..."}
+        ) + "\n\n"
 
         # Collect full markdown from Claude
         full_markdown = ""
@@ -269,11 +271,13 @@ async def generate_resume(
                     text = chunk.choices[0].delta.content or ""
                     full_markdown += text
         except Exception as e:
-            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+            yield "data: " + json.dumps({"status": "error", "message": str(e)}) + "\n\n"
             yield "data: [DONE]\n\n"
             return
 
-        yield f"data: {json.dumps({'status': 'creating_doc', 'message': 'Creating Google Doc\u2026'})}\n\n"
+        yield "data: " + json.dumps(
+            {"status": "creating_doc", "message": "Creating Google Doc..."}
+        ) + "\n\n"
 
         # Convert markdown → HTML
         html_content = markdown_to_resume_html(full_markdown)
@@ -284,7 +288,9 @@ async def generate_resume(
             doc_data = await create_doc_in_folder(user["sub"], title, html_content, folder_id)
             await set_doc_margins(user["sub"], doc_data["id"])
         except Exception as e:
-            yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
+            yield "data: " + json.dumps(
+                {"status": "error", "message": f"Failed to create Google Doc: {e}"}
+            ) + "\n\n"
             yield "data: [DONE]\n\n"
             return
 
