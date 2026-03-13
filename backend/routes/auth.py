@@ -86,6 +86,8 @@ async def connect_drive(request: Request, token: str = Query(...)) -> RedirectRe
     redirect_uri = f"{backend_base}/api/auth/drive-callback"
     state = f"drive_{user_id}"
     from auth_utils import get_google_drive_auth_url
+    import logging
+    logging.getLogger("uvicorn").info(f"[connect-drive] redirect_uri={redirect_uri}")
     return RedirectResponse(url=get_google_drive_auth_url(state, redirect_uri))
 
 
