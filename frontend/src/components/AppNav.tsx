@@ -6,6 +6,7 @@ const PAGES = [
   { path: '/', label: 'Resume Editor' },
   { path: '/jobs', label: 'Find Jobs' },
   { path: '/applications', label: 'Applications' },
+  { path: '/docs', label: 'Resume Docs' },
 ]
 
 interface AppNavProps {

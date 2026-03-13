@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage'
 import EditorPage from './pages/EditorPage'
 import JobsPage from './pages/JobsPage'
 import ApplicationsPage from './pages/ApplicationsPage'
+import GDocsPage from './pages/GDocsPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
 function AppInner() {
@@ -39,6 +40,7 @@ function AppInner() {
   if (!user) return <LoginPage />
   if (path === '/jobs') return <JobsPage />
   if (path === '/applications') return <ApplicationsPage />
+  if (path === '/docs') return <GDocsPage />
   return <EditorPage />
 }
 

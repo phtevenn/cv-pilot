@@ -104,6 +104,37 @@ export interface ApplicationUpdate {
   notes?: string
 }
 
+export interface GDocCategory {
+  id: string
+  name: string
+  color: string
+}
+
+export interface GDocResumeMeta {
+  id: string
+  google_doc_id: string
+  title: string
+  category_id: string | null
+  google_doc_url: string
+  preview_url: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GDocGenerateEvent {
+  status: 'generating' | 'creating_doc' | 'done' | 'error'
+  message?: string
+  // present when status === 'done':
+  id?: string
+  google_doc_id?: string
+  title?: string
+  category_id?: string | null
+  google_doc_url?: string
+  preview_url?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export class RateLimitError extends Error {
   retryAfter: number | null
   constructor(message: string, retryAfter: number | null = null) {
@@ -428,6 +459,112 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ resume, job_description: jobDescription }),
     }),
+
+  gdocsAuthStatus: async () => {
+    const resp = await fetch(`${API_BASE}/api/gdocs/auth-status`, {
+      headers: { ...authHeaders() },
+    })
+    if (!resp.ok) throw new Error('Failed to check Drive auth status')
+    return resp.json() as Promise<{ has_drive_access: boolean }>
+  },
+
+  gdocsListCategories: async () => {
+    const resp = await fetch(`${API_BASE}/api/gdocs/categories`, {
+      headers: { ...authHeaders() },
+    })
+    if (!resp.ok) throw new Error('Failed to list categories')
+    return resp.json() as Promise<{ categories: GDocCategory[] }>
+  },
+
+  gdocsCreateCategory: async (name: string, color: string = 'blue') => {
+    const resp = await fetch(`${API_BASE}/api/gdocs/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ name, color }),
+    })
+    if (!resp.ok) throw new Error('Failed to create category')
+    return resp.json() as Promise<GDocCategory>
+  },
+
+  gdocsUpdateCategory: async (id: string, updates: Partial<Pick<GDocCategory, 'name' | 'color'>>) => {
+    const resp = await fetch(`${API_BASE}/api/gdocs/categories/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(updates),
+    })
+    if (!resp.ok) throw new Error('Failed to update category')
+    return resp.json() as Promise<GDocCategory>
+  },
+
+  gdocsDeleteCategory: async (id: string) => {
+    await fetch(`${API_BASE}/api/gdocs/categories/${id}`, {
+      method: 'DELETE',
+      headers: { ...authHeaders() },
+    })
+  },
+
+  gdocsListResumes: async (categoryId?: string) => {
+    const params = categoryId ? `?category_id=${categoryId}` : ''
+    const resp = await fetch(`${API_BASE}/api/gdocs/resumes${params}`, {
+      headers: { ...authHeaders() },
+    })
+    if (!resp.ok) throw new Error('Failed to list resumes')
+    return resp.json() as Promise<{ resumes: GDocResumeMeta[] }>
+  },
+
+  gdocsUpdateResume: async (id: string, updates: { title?: string; category_id?: string | null }) => {
+    const resp = await fetch(`${API_BASE}/api/gdocs/resumes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(updates),
+    })
+    if (!resp.ok) throw new Error('Failed to update resume')
+    return resp.json() as Promise<GDocResumeMeta>
+  },
+
+  gdocsDeleteResume: async (id: string) => {
+    await fetch(`${API_BASE}/api/gdocs/resumes/${id}`, {
+      method: 'DELETE',
+      headers: { ...authHeaders() },
+    })
+  },
+
+  gdocsGenerateResume: (
+    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number },
+    onEvent: (event: GDocGenerateEvent) => void,
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      fetch(`${API_BASE}/api/gdocs/resumes/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(params),
+      }).then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: 'Unknown error' }))
+          reject(new Error((err as { detail?: string }).detail || 'Generation failed'))
+          return
+        }
+        const reader = res.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6).trim()
+              if (data === '[DONE]') { resolve(); return }
+              try { onEvent(JSON.parse(data) as GDocGenerateEvent) } catch { /* ignore malformed */ }
+            }
+          }
+        }
+        resolve()
+      }).catch(reject)
+    })
+  },
 
   optimizeStream: async (
     resume: string,
