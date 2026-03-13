@@ -17,6 +17,7 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_SCOPES = ["openid", "email", "profile"]
+GOOGLE_DRIVE_SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"]
 
 
 def get_google_auth_url(state: str, redirect_uri: str) -> str:
@@ -30,6 +31,36 @@ def get_google_auth_url(state: str, redirect_uri: str) -> str:
         "prompt": "select_account",
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+def get_google_drive_auth_url(state: str, redirect_uri: str) -> str:
+    """Like get_google_auth_url but with Drive scope added."""
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_DRIVE_SCOPES),
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",  # Force consent to always get refresh_token
+    }
+    return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+async def refresh_google_access_token(refresh_token: str) -> dict:
+    """Use refresh_token to get a new access_token. Returns token response dict."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
 
 async def exchange_code_for_tokens(code: str, redirect_uri: str) -> dict:
