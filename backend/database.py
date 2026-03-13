@@ -38,6 +38,43 @@ def _run_migrations(engine) -> None:
             if "active_resume_id" not in cols:
                 conn.execute(text("ALTER TABLE user_meta ADD COLUMN active_resume_id TEXT"))
 
+        # Create new gdocs tables if not present (SQLModel.metadata.create_all handles new DBs;
+        # this block ensures the tables exist on existing DBs before create_all runs)
+        if "user_google_tokens" not in existing_tables:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS user_google_tokens ("
+                "user_id TEXT PRIMARY KEY, "
+                "access_token TEXT NOT NULL, "
+                "refresh_token TEXT, "
+                "token_expiry TEXT"
+                ")"
+            ))
+        if "gdoc_categories" not in existing_tables:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS gdoc_categories ("
+                "id TEXT PRIMARY KEY, "
+                "user_id TEXT NOT NULL, "
+                "name TEXT NOT NULL, "
+                "color TEXT NOT NULL DEFAULT 'blue'"
+                ")"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_categories_user_id ON gdoc_categories (user_id)"))
+        if "gdoc_resumes" not in existing_tables:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS gdoc_resumes ("
+                "id TEXT PRIMARY KEY, "
+                "user_id TEXT NOT NULL, "
+                "category_id TEXT, "
+                "google_doc_id TEXT NOT NULL, "
+                "title TEXT NOT NULL, "
+                "job_description TEXT NOT NULL DEFAULT '', "
+                "created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL"
+                ")"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_user_id ON gdoc_resumes (user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_category_id ON gdoc_resumes (category_id)"))
+
         conn.commit()
 
 
@@ -113,3 +150,34 @@ class ResumeSnapshot(SQLModel, table=True):
     content: str = Field(default="")
     label: str = Field(default="")
     created_at: str
+
+
+class UserGoogleToken(SQLModel, table=True):
+    __tablename__ = "user_google_tokens"
+
+    user_id: str = Field(primary_key=True)
+    access_token: str
+    refresh_token: Optional[str] = Field(default=None)
+    token_expiry: Optional[str] = Field(default=None)  # ISO datetime
+
+
+class GDocCategory(SQLModel, table=True):
+    __tablename__ = "gdoc_categories"
+
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    name: str
+    color: str = Field(default="blue")
+
+
+class GDocResume(SQLModel, table=True):
+    __tablename__ = "gdoc_resumes"
+
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    category_id: Optional[str] = Field(default=None, index=True)
+    google_doc_id: str
+    title: str
+    job_description: str = Field(default="")
+    created_at: str
+    updated_at: str

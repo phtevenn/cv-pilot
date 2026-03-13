@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from database import Application, ResumeDoc, ResumeSnapshot, ResumeVersion, UserMeta, get_engine
+from database import Application, GDocCategory, GDocResume, ResumeDoc, ResumeSnapshot, ResumeVersion, UserGoogleToken, UserMeta, get_engine
 
 SAMPLE_RESUME = """\
 **STEPHEN YU**
