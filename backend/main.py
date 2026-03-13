@@ -7,7 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 from config import FRONTEND_URL
 from database import create_db_and_tables
 from rate_limit import limiter
-from routes import applications, auth, chat, jobs, llm, pdf, resume
+from routes import applications, auth, chat, gdocs, jobs, llm, pdf, resume
 
 app = FastAPI(title="CV Pilot API", version="0.1.0")
 create_db_and_tables()
@@ -31,6 +31,7 @@ app.include_router(llm.router, prefix="/api/llm", tags=["llm"])
 app.include_router(chat.router, prefix="/api/llm", tags=["llm"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(applications.router, prefix="/api/applications", tags=["applications"])
+app.include_router(gdocs.router, prefix="/api/gdocs", tags=["gdocs"])
 
 
 @app.get("/api/health")
