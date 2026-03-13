@@ -14,6 +14,12 @@ _PDF_TEMPLATE = """\
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body {{ margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  /* Explicit font-weight utilities — CDN Tailwind's dynamically injected styles may not
+     apply in Playwright's PDF/print context; these rules come after the injected style
+     in the cascade and guarantee correct rendering. */
+  .font-medium {{ font-weight: 500; }}
+  .font-semibold {{ font-weight: 600; }}
+  .font-bold {{ font-weight: 700; }}
 </style>
 </head>
 <body class="font-sans bg-white">
