@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 import storage
 from auth_utils import (
     create_access_token,
+    decode_access_token,
     exchange_code_for_tokens,
     get_google_auth_url,
     get_google_user_info,
@@ -70,3 +71,63 @@ async def callback(
 @router.get("/me")
 async def me(user: dict = Depends(get_current_user)) -> dict:
     return user
+
+
+@router.get("/connect-drive")
+async def connect_drive(request: Request, token: str = Query(...)) -> RedirectResponse:
+    """Initiate Google OAuth with Drive scope. token is the user's JWT."""
+    try:
+        user = decode_access_token(token)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user["sub"]
+    backend_base = BACKEND_URL or _public_base(request)
+    redirect_uri = f"{backend_base}/api/auth/drive-callback"
+    state = f"drive_{user_id}"
+    from auth_utils import get_google_drive_auth_url
+    return RedirectResponse(url=get_google_drive_auth_url(state, redirect_uri))
+
+
+@router.get("/drive-callback")
+async def drive_callback(
+    request: Request,
+    code: str = Query(...),
+    state: str = Query(...),
+) -> RedirectResponse:
+    """Handle Drive OAuth callback, store tokens, redirect to /docs."""
+    from fastapi import HTTPException
+    if not state.startswith("drive_"):
+        raise HTTPException(status_code=400, detail="Invalid state")
+    user_id = state[6:]
+    backend_base = BACKEND_URL or _public_base(request)
+    redirect_uri = f"{backend_base}/api/auth/drive-callback"
+    from auth_utils import exchange_code_for_tokens, refresh_google_access_token
+    token_data = await exchange_code_for_tokens(code, redirect_uri)
+    # Store tokens
+    from database import get_engine, UserGoogleToken
+    from sqlmodel import Session
+    from datetime import datetime, timezone, timedelta
+    expiry = None
+    if "expires_in" in token_data:
+        expiry = (datetime.now(timezone.utc) + timedelta(seconds=int(token_data["expires_in"]))).isoformat()
+    with Session(get_engine()) as session:
+        existing = session.get(UserGoogleToken, user_id)
+        if existing:
+            existing.access_token = token_data["access_token"]
+            if token_data.get("refresh_token"):
+                existing.refresh_token = token_data["refresh_token"]
+            existing.token_expiry = expiry
+            session.add(existing)
+        else:
+            tok = UserGoogleToken(
+                user_id=user_id,
+                access_token=token_data["access_token"],
+                refresh_token=token_data.get("refresh_token"),
+                token_expiry=expiry,
+            )
+            session.add(tok)
+        session.commit()
+    from config import FRONTEND_URL, BACKEND_URL
+    frontend_base = FRONTEND_URL or _public_base(request)
+    return RedirectResponse(url=f"{frontend_base}/docs")
