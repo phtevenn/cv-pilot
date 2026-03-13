@@ -46,6 +46,11 @@ function formatRelativeTime(iso: string): string {
   }
 }
 
+function extractDocId(url: string): string | null {
+  const m = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/)
+  return m ? m[1] : null
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -175,6 +180,7 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
   const [jobDescription, setJobDescription] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
   const [pageLimit, setPageLimit] = useState<number>(1)
+  const [sourceDocUrl, setSourceDocUrl] = useState('')
   const [generating, setGenerating] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -182,6 +188,11 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
   const handleGenerate = async () => {
     if (!title.trim()) { setError('Please enter a resume title.'); return }
     if (!jobDescription.trim()) { setError('Please paste a job description.'); return }
+    const sourceDocId = sourceDocUrl.trim() ? extractDocId(sourceDocUrl.trim()) : null
+    if (sourceDocUrl.trim() && !sourceDocId) {
+      setError('Invalid Google Docs URL. Please paste the full URL from your browser.')
+      return
+    }
     setError(null)
     setGenerating(true)
     setStatusMessage('Starting generation…')
@@ -195,6 +206,7 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
           job_description: jobDescription.trim(),
           category_id: categoryId || null,
           page_limit: pageLimit,
+          source_doc_id: sourceDocId,
         },
         (event: GDocGenerateEvent) => {
           if (event.status === 'generating') {
@@ -259,6 +271,21 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
               disabled={generating}
               className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">
+              Starting Resume <span className="text-gray-500 font-normal">(optional)</span>
+            </label>
+            <input
+              type="url"
+              value={sourceDocUrl}
+              onChange={(e) => setSourceDocUrl(e.target.value)}
+              placeholder="Paste a Google Docs URL, or leave blank to use your current resume"
+              disabled={generating}
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
+            />
+            <p className="text-gray-500 text-xs">If blank, your saved resume in the editor will be used as the starting point.</p>
           </div>
 
           <div className="flex flex-col gap-1.5">

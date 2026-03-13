@@ -12,6 +12,7 @@ from deps import get_current_user
 from gdocs_client import (
     create_doc_in_folder,
     delete_drive_file,
+    fetch_doc_as_text,
     get_folder_id,
     get_or_create_folder,
     has_drive_access,
@@ -210,6 +211,7 @@ async def generate_resume(
     job_description: str = body.get("job_description", "")
     category_id: Optional[str] = body.get("category_id") or None
     page_limit: int = max(1, min(int(body.get("page_limit", 1)), 5))
+    source_doc_id: Optional[str] = body.get("source_doc_id") or None
 
     if not job_description.strip():
         raise HTTPException(status_code=422, detail="job_description is required")
@@ -217,9 +219,15 @@ async def generate_resume(
     if not has_drive_access(user["sub"]):
         raise HTTPException(status_code=403, detail="Google Drive not connected")
 
-    # Load user's current base resume content
+    # Load base resume: from a source Google Doc if provided, else the editor resume
     import storage
-    base_resume = storage.load_resume(user["sub"])
+    if source_doc_id:
+        try:
+            base_resume = await fetch_doc_as_text(user["sub"], source_doc_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read source Google Doc: {e}")
+    else:
+        base_resume = storage.load_resume(user["sub"])
 
     try:
         client, model = get_client("optimize")
