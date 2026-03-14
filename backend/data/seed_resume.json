@@ -1,0 +1,99 @@
+{
+  "name": "Stephen Yu",
+  "title": "Scientist / Computational Biologist",
+  "industry": "Biotechnology",
+  "contact": {
+    "email": "yu.m.stephen@gmail.com",
+    "phone": "970-297-8699",
+    "linkedin": "linkedin.com/in/stephen-yu-b844b5144",
+    "location": "Mountain View, CA"
+  },
+  "summary": "Scientist with 8+ years in protein biochemistry and drug discovery, utilizing computational skills to drive data analysis and bioinformatics insights across immuno-oncology and small molecule research",
+  "skills": {
+    "technical": "Bash, Python, SQL, R",
+    "domain": "Bulk and single-cell RNA-Seq, WES, variant calling, immune repertoire profiling",
+    "tools": "AWS, Docker / Singularity, Git, Linux, Slurm",
+    "languages": "",
+    "soft": ""
+  },
+  "experience": [
+    {
+      "title": "Scientist",
+      "company": "Gate Bioscience",
+      "dates": "02/2023 - Present",
+      "location": "",
+      "bullets": [
+        "Developed and operated an in-house RNA-Seq analysis pipeline (Nextflow on AWS ParallelCluster), later migrated to AWS HealthOmics for fully managed execution",
+        "Analyzed transcriptomic effects of SEC61 inhibition across multiple cell lines and tissues, uncovering mechanistic insights into stress-response pathways, apoptosis, and factors affecting therapeutic index",
+        "Identified a key biomarker of SEC61-induced stress to monitor stress induction in vitro and in vivo",
+        "Leveraged public scRNA-Seq datasets to map pathway activation signatures and compare Gate's molecules to standard of care biologics",
+        "Used TRUST4 to assemble expressed light-chain sequences from bulk RNA-Seq data",
+        "Built a reproducible pipeline to generate cross-species SEC61 client databases by integrating UniProt, ENSEMBL, OMA, SignalP, and Phobius annotations for any target species",
+        "Trained machine-learning models to predict SEC61 inhibitor off-targets and applied SHAP analysis to identify signal-peptide features driving selective inhibition",
+        "Collaborated with wet-lab and engineering teams to design experiments and deploy analysis pipelines"
+      ]
+    },
+    {
+      "title": "Senior Research Associate",
+      "company": "Harpoon Therapeutics",
+      "dates": "09/2017 - 11/2022",
+      "location": "",
+      "bullets": [
+        "Supported T-cell engager platforms (TriTAC / ProTriTAC) through affinity characterization, species cross-reactivity studies, epitope binning, and binder screening",
+        "Authored IND-enabling kinetics and binding study reports for advanced T-cell engager programs, including affinity, cross-reactivity, and epitope characterization packages used in regulatory submissions",
+        "Automated lab workflows via custom Tecan Fluent scripts; developed Benchling dashboards for experiment tracking and reagent management",
+        "Screened up to thousands of binders weekly to support antibody engineering campaigns",
+        "Developed and optimized SPR/BLI assays for affinity, kinetics, and titer quantification of engineered antibodies and fusion proteins",
+        "Designed mammalian expression workflows and optimized processes to improve expression of difficult-to-express proteins by ~50-fold"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Masters of Science, Analytics in Computational Data Analytics",
+      "school": "Georgia Institute of Technology",
+      "graduation": "01/2023",
+      "location": "",
+      "gpa": "",
+      "details": []
+    },
+    {
+      "degree": "Bachelors of Science in Biochemistry",
+      "school": "University of California Los Angeles",
+      "graduation": "01/2017",
+      "location": "",
+      "gpa": "",
+      "details": []
+    }
+  ],
+  "projects": [
+    {
+      "name": "Agent Swarm",
+      "stack": "TypeScript, Ink",
+      "bullets": [
+        "Orchestration framework enabling multiple coding agents (Claude Code, Codex, Gemini) to cooperate; lead agent accepts tasks, breaks them down, and delegates subtasks to parallel worker agents"
+      ]
+    },
+    {
+      "name": "Benchling Agent",
+      "stack": "Python, browser automation",
+      "bullets": [
+        "AI agent that converses with users to plan experiments and automatically writes Benchling lab notebook entries based on the plans"
+      ]
+    },
+    {
+      "name": "Lunar Lander",
+      "stack": "Python, PyTorch",
+      "bullets": [
+        "Implemented a Deep-Q network from scratch to solve the OpenAI Gym Lunar Lander V2 environment using reinforcement learning"
+      ]
+    }
+  ],
+  "certifications": [],
+  "publications": [
+    "Antonia R, Yu S, et al. Inhibition of the Sec61 translocon promotes immunoglobulin light chain-dependent cell stress and apoptosis: therapeutic implications for AL amyloidosis. Blood. 144(Suppl 1):6862. doi:10.1182/blood-2024-198698",
+    "Molloy ME, Aaron WH, Barath M, et al. HPN328, a trispecific T cell-activating protein construct targeting DLL3-expressing solid tumors. Mol Cancer Ther. 23(9):1294-1304. doi:10.1158/1535-7163.MCT-23-0524.",
+    "Austin RJ, Lemon BD, Aaron WH, et al. TriTACs, a novel class of T-cell-engaging protein constructs designed for the treatment of solid tumors. Mol Cancer Ther. 20(1):109-120. doi:10.1158/1535-7163.MCT-20-0061"
+  ],
+  "volunteer": []
+}

@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,12 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
-from database import GDocCategory, GDocResume, get_engine
+from database import GDocCategory, GDocResume, GDocTemplate, get_engine
 from deps import get_current_user
 from gdocs_client import (
     create_styled_doc_in_folder,
     delete_drive_file,
     fetch_doc_as_text,
+    fill_template_doc,
     get_folder_id,
     get_or_create_folder,
     has_drive_access,
@@ -113,6 +115,66 @@ async def get_folder(user: dict = Depends(get_current_user)) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+
+@router.get("/templates")
+async def list_templates(user: dict = Depends(get_current_user)) -> dict:
+    with Session(get_engine()) as session:
+        stmt = select(GDocTemplate).where(GDocTemplate.user_id == user["sub"])
+        templates = session.exec(stmt).all()
+        return {
+            "templates": [
+                {"id": t.id, "google_doc_id": t.google_doc_id, "name": t.name, "created_at": t.created_at}
+                for t in templates
+            ]
+        }
+
+
+@router.post("/templates", status_code=201)
+async def create_template(request: Request, user: dict = Depends(get_current_user)) -> dict:
+    body = await request.json()
+    name = body.get("name", "").strip()
+    google_doc_url = body.get("google_doc_url", "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    if not google_doc_url:
+        raise HTTPException(status_code=422, detail="google_doc_url is required")
+    m = re.search(r"/document/d/([a-zA-Z0-9_-]+)", google_doc_url)
+    if not m:
+        raise HTTPException(status_code=422, detail="Invalid Google Docs URL")
+    google_doc_id = m.group(1)
+    template = GDocTemplate(
+        id=str(uuid.uuid4()),
+        user_id=user["sub"],
+        google_doc_id=google_doc_id,
+        name=name,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    with Session(get_engine()) as session:
+        session.add(template)
+        session.commit()
+        session.refresh(template)
+        return {
+            "id": template.id,
+            "google_doc_id": template.google_doc_id,
+            "name": template.name,
+            "created_at": template.created_at,
+        }
+
+
+@router.delete("/templates/{template_id}", status_code=204)
+async def delete_template(template_id: str, user: dict = Depends(get_current_user)) -> None:
+    with Session(get_engine()) as session:
+        t = session.get(GDocTemplate, template_id)
+        if t is None or t.user_id != user["sub"]:
+            raise HTTPException(status_code=404, detail="Template not found")
+        session.delete(t)
+        session.commit()
+
+
+# ---------------------------------------------------------------------------
 # GDoc Resumes — Drive is source of truth, SQLite stores only category tags
 # ---------------------------------------------------------------------------
 
@@ -174,7 +236,86 @@ async def list_resumes(
     return {"resumes": resumes}
 
 
-# System prompt reused from llm.py logic
+# ---------------------------------------------------------------------------
+# System prompts
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT_JSON = """\
+You are a professional resume optimizer. Given a resume and a job description, \
+output a JSON object representing a tailored resume that targets the role.
+
+OUTPUT FORMAT: Return ONLY valid JSON — no markdown code fences, no commentary.
+
+The JSON must follow this exact schema:
+{{
+  "name": "Full Name",
+  "title": "Professional Title / Industry Focus",
+  "industry": "Industry",
+  "contact": {{
+    "email": "...",
+    "phone": "...",
+    "linkedin": "...",
+    "location": "City, State"
+  }},
+  "summary": "1-2 sentence professional summary",
+  "skills": {{
+    "technical": "comma-separated technical skills",
+    "domain": "domain expertise",
+    "tools": "tools and technologies",
+    "languages": "programming languages or empty string",
+    "soft": "soft skills or empty string"
+  }},
+  "experience": [
+    {{
+      "title": "Job Title",
+      "company": "Company Name",
+      "dates": "MM/YYYY - MM/YYYY or Present",
+      "location": "City, State or empty string",
+      "bullets": ["bullet point 1", "bullet point 2"]
+    }}
+  ],
+  "education": [
+    {{
+      "degree": "Degree Name",
+      "school": "School Name",
+      "graduation": "MM/YYYY",
+      "location": "City, State or empty string",
+      "gpa": "GPA or empty string",
+      "details": []
+    }}
+  ],
+  "projects": [
+    {{
+      "name": "Project Name",
+      "stack": "Technologies used",
+      "bullets": ["description bullet"]
+    }}
+  ],
+  "certifications": [
+    {{
+      "name": "Certification Name",
+      "org": "Issuing Organization",
+      "year": "Year"
+    }}
+  ],
+  "publications": ["Full citation as a string"],
+  "volunteer": [
+    {{
+      "role": "Role Title",
+      "org": "Organization",
+      "dates": "MM/YYYY - MM/YYYY",
+      "bullets": ["bullet point"]
+    }}
+  ]
+}}
+
+RULES:
+1. Strengthen bullet points with impact-driven language and keywords from the job description.
+2. Do not invent experience or credentials not present in the original resume.
+3. Use empty arrays [] for sections absent from the original.
+4. The tailored resume must fit within {page_limit} page{page_limit_plural}.\
+"""
+
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a professional resume optimizer. Given a resume in Markdown format and a job description, \
 rewrite the resume to better target the role.
@@ -211,6 +352,7 @@ async def generate_resume(
     page_limit: int = max(1, min(int(body.get("page_limit", 1)), 5))
     source_doc_id: Optional[str] = body.get("source_doc_id") or None
     custom_instructions: str = (body.get("custom_instructions") or "").strip()
+    template_doc_id: Optional[str] = body.get("template_doc_id") or None
 
     if not job_description.strip():
         raise HTTPException(status_code=422, detail="job_description is required")
@@ -233,19 +375,28 @@ async def generate_resume(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        page_limit=page_limit,
-        page_limit_plural="s" if page_limit > 1 else "",
-    )
+    use_template = template_doc_id is not None
+    if use_template:
+        system_prompt = _SYSTEM_PROMPT_JSON.format(
+            page_limit=page_limit,
+            page_limit_plural="s" if page_limit > 1 else "",
+        )
+    else:
+        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+            page_limit=page_limit,
+            page_limit_plural="s" if page_limit > 1 else "",
+        )
+
     user_message = f"## Resume\n\n{base_resume}\n\n## Job Description\n\n{job_description}"
     if custom_instructions:
         user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
 
     async def event_stream():
-        yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating tailored resume with AI\u2026'})}\n\n"
+        generating_msg = "Generating resume data with AI\u2026" if use_template else "Generating tailored resume with AI\u2026"
+        yield f"data: {json.dumps({'status': 'generating', 'message': generating_msg})}\n\n"
 
-        # Collect full markdown from Claude
-        full_markdown = ""
+        # Collect full output from Claude
+        full_output = ""
         try:
             if isinstance(client, AsyncAnthropic):
                 async with client.messages.stream(
@@ -255,7 +406,7 @@ async def generate_resume(
                     messages=[{"role": "user", "content": user_message}],
                 ) as stream:
                     async for text in stream.text_stream:
-                        full_markdown += text
+                        full_output += text
             else:
                 stream = await client.chat.completions.create(
                     model=model,
@@ -268,18 +419,27 @@ async def generate_resume(
                 )
                 async for chunk in stream:
                     text = chunk.choices[0].delta.content or ""
-                    full_markdown += text
+                    full_output += text
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
-        yield f"data: {json.dumps({'status': 'creating_doc', 'message': 'Creating Google Doc\u2026'})}\n\n"
+        creating_msg = "Filling template\u2026" if use_template else "Creating Google Doc\u2026"
+        yield f"data: {json.dumps({'status': 'creating_doc', 'message': creating_msg})}\n\n"
 
-        # Create the doc using the Docs API for reliable native formatting
+        # Create the doc
         try:
             folder_id = await get_or_create_folder(user["sub"])
-            doc_data = await create_styled_doc_in_folder(user["sub"], title, full_markdown, folder_id)
+            if use_template:
+                # Parse JSON output from Claude
+                try:
+                    resume_json = json.loads(full_output.strip())
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"AI output was not valid JSON: {e}")
+                doc_data = await fill_template_doc(user["sub"], template_doc_id, title, resume_json, folder_id)
+            else:
+                doc_data = await create_styled_doc_in_folder(user["sub"], title, full_output, folder_id)
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
             yield "data: [DONE]\n\n"

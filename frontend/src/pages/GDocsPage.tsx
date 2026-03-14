@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import { AppNav } from '../components/AppNav'
-import { api, API_BASE, type GDocCategory, type GDocResumeMeta, type GDocGenerateEvent } from '../api/client'
+import { api, API_BASE, type GDocCategory, type GDocResumeMeta, type GDocTemplate, type GDocGenerateEvent } from '../api/client'
 
 // ---------------------------------------------------------------------------
 // Color mapping for category pills
@@ -171,17 +171,19 @@ function ResumeCardMenu({ resume, categories, onRename, onMove, onDelete }: Resu
 // ---------------------------------------------------------------------------
 interface NewResumeModalProps {
   categories: GDocCategory[]
+  templates: GDocTemplate[]
   onClose: () => void
   onSuccess: (resume: GDocResumeMeta) => void
 }
 
-function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps) {
+function NewResumeModal({ categories, templates, onClose, onSuccess }: NewResumeModalProps) {
   const [title, setTitle] = useState('')
   const [jobDescription, setJobDescription] = useState('')
   const [customInstructions, setCustomInstructions] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
   const [pageLimit, setPageLimit] = useState<number>(1)
   const [sourceDocUrl, setSourceDocUrl] = useState('')
+  const [templateId, setTemplateId] = useState<string>('')
   const [generating, setGenerating] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -194,6 +196,7 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
       setError('Invalid Google Docs URL. Please paste the full URL from your browser.')
       return
     }
+    const selectedTemplate = templateId ? templates.find((t) => t.id === templateId) : null
     setError(null)
     setGenerating(true)
     setStatusMessage('Starting generation…')
@@ -209,6 +212,7 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
           page_limit: pageLimit,
           source_doc_id: sourceDocId,
           custom_instructions: customInstructions.trim() || null,
+          template_doc_id: selectedTemplate ? selectedTemplate.google_doc_id : null,
         },
         (event: GDocGenerateEvent) => {
           if (event.status === 'generating') {
@@ -289,6 +293,28 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
             />
             <p className="text-gray-500 text-xs">If blank, your saved resume in the editor will be used as the starting point.</p>
           </div>
+
+          {templates.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-gray-300 text-sm font-medium">
+                Template <span className="text-gray-500 font-normal">(optional)</span>
+              </label>
+              <select
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+                disabled={generating}
+                className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
+              >
+                <option value="">No template — AI generates styled doc</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              {templateId && (
+                <p className="text-gray-500 text-xs">AI will fill placeholders in your template with tailored content.</p>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label className="text-gray-300 text-sm font-medium">Job Description</label>
@@ -375,6 +401,100 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
             {generating ? 'Generating…' : 'Generate & Save to Google Docs'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Add Template Modal
+// ---------------------------------------------------------------------------
+interface AddTemplateModalProps {
+  onClose: () => void
+  onCreated: (template: GDocTemplate) => void
+}
+
+function AddTemplateModal({ onClose, onCreated }: AddTemplateModalProps) {
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameRef.current?.focus()
+  }, [])
+
+  const handleCreate = async () => {
+    if (!name.trim()) { setError('Please enter a template name.'); return }
+    if (!url.trim()) { setError('Please paste a Google Docs URL.'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      const t = await api.gdocsCreateTemplate(name.trim(), url.trim())
+      onCreated(t)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add template.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-sm mx-4">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
+          <h2 className="text-white font-semibold text-base">Add Template</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors" aria-label="Close">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">Template Name</label>
+            <input
+              ref={nameRef}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+              placeholder="e.g. Clean One-Page"
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">Google Docs URL</label>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://docs.google.com/document/d/…"
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors"
+            />
+            <p className="text-gray-500 text-xs">
+              The doc must use <span className="font-mono text-gray-400">&lt;&lt;PLACEHOLDER&gt;&gt;</span> fields. It will be copied and filled each time you generate a resume.
+            </p>
+          </div>
+          {error && (
+            <div className="text-red-400 text-sm bg-red-950/50 border border-red-800 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-700">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={saving}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {saving ? 'Adding…' : 'Add Template'}
           </button>
         </div>
       </div>
@@ -627,6 +747,7 @@ function DeleteResumeModal({ resume, onClose, onDeleted }: DeleteResumeModalProp
 export default function GDocsPage() {
   const [hasDriveAccess, setHasDriveAccess] = useState<boolean | null>(null)
   const [categories, setCategories] = useState<GDocCategory[]>([])
+  const [templates, setTemplates] = useState<GDocTemplate[]>([])
   const [resumes, setResumes] = useState<GDocResumeMeta[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedResume, setSelectedResume] = useState<GDocResumeMeta | null>(null)
@@ -636,6 +757,7 @@ export default function GDocsPage() {
   // Modals
   const [showNewModal, setShowNewModal] = useState(false)
   const [showNewCategoryModal, setShowNewCategoryModal] = useState(false)
+  const [showAddTemplateModal, setShowAddTemplateModal] = useState(false)
   const [renameTarget, setRenameTarget] = useState<GDocResumeMeta | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<GDocResumeMeta | null>(null)
 
@@ -643,14 +765,16 @@ export default function GDocsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [authStatus, categoriesData, resumesData] = await Promise.all([
+      const [authStatus, categoriesData, resumesData, templatesData] = await Promise.all([
         api.gdocsAuthStatus(),
         api.gdocsListCategories(),
         api.gdocsListResumes(),
+        api.gdocsListTemplates(),
       ])
       setHasDriveAccess(authStatus.has_drive_access)
       setCategories(categoriesData.categories)
       setResumes(resumesData.resumes)
+      setTemplates(templatesData.templates)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data.')
     } finally {
@@ -694,6 +818,22 @@ export default function GDocsPage() {
     setDeleteTarget(null)
     setResumes((prev) => prev.filter((r) => r.id !== id))
     if (selectedResume?.id === id) setSelectedResume(null)
+  }
+
+  const handleTemplateCreated = (t: GDocTemplate) => {
+    setShowAddTemplateModal(false)
+    setTemplates((prev) => [...prev, t])
+    toast.success(`Template "${t.name}" added.`)
+  }
+
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      await api.gdocsDeleteTemplate(id)
+      setTemplates((prev) => prev.filter((t) => t.id !== id))
+      toast.success('Template removed.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove template.')
+    }
   }
 
   const handleMove = async (resume: GDocResumeMeta, categoryId: string | null) => {
@@ -781,6 +921,45 @@ export default function GDocsPage() {
             >
               +
             </button>
+          </div>
+
+          {/* Templates section */}
+          <div className="border-b border-gray-700 shrink-0">
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/50">
+              <span className="text-gray-500 text-xs font-medium uppercase tracking-wide">Templates</span>
+              <button
+                onClick={() => setShowAddTemplateModal(true)}
+                className="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-300 hover:bg-gray-700 rounded transition-colors text-sm leading-none"
+                aria-label="Add template"
+              >
+                +
+              </button>
+            </div>
+            {templates.length === 0 ? (
+              <p className="px-4 py-2 text-xs text-gray-600">No templates. Add a Google Doc template to use it for generation.</p>
+            ) : (
+              <div className="flex flex-col">
+                {templates.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between px-4 py-2 hover:bg-gray-800/60 group">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <svg className="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="text-xs text-gray-300 truncate">{t.name}</span>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteTemplate(t.id)}
+                      className="text-gray-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0 ml-2"
+                      aria-label={`Remove template ${t.name}`}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Resume list */}
@@ -922,6 +1101,7 @@ export default function GDocsPage() {
       {showNewModal && (
         <NewResumeModal
           categories={categories}
+          templates={templates}
           onClose={() => setShowNewModal(false)}
           onSuccess={handleNewResumeSuccess}
         />
@@ -930,6 +1110,12 @@ export default function GDocsPage() {
         <NewCategoryModal
           onClose={() => setShowNewCategoryModal(false)}
           onCreated={handleCategoryCreated}
+        />
+      )}
+      {showAddTemplateModal && (
+        <AddTemplateModal
+          onClose={() => setShowAddTemplateModal(false)}
+          onCreated={handleTemplateCreated}
         />
       )}
       {renameTarget && (
