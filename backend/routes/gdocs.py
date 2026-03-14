@@ -10,16 +10,14 @@ from sqlmodel import Session, select
 from database import GDocCategory, GDocResume, get_engine
 from deps import get_current_user
 from gdocs_client import (
-    create_doc_in_folder,
+    create_styled_doc_in_folder,
     delete_drive_file,
     fetch_doc_as_text,
     get_folder_id,
     get_or_create_folder,
     has_drive_access,
     list_docs_in_folder,
-    markdown_to_resume_html,
     rename_drive_file,
-    set_doc_margins,
 )
 from llm_client import get_client
 from anthropic import AsyncAnthropic
@@ -278,14 +276,10 @@ async def generate_resume(
 
         yield f"data: {json.dumps({'status': 'creating_doc', 'message': 'Creating Google Doc\u2026'})}\n\n"
 
-        # Convert markdown → HTML
-        html_content = markdown_to_resume_html(full_markdown)
-
-        # Get/create the CV Pilot folder and create the doc inside it
+        # Create the doc using the Docs API for reliable native formatting
         try:
             folder_id = await get_or_create_folder(user["sub"])
-            doc_data = await create_doc_in_folder(user["sub"], title, html_content, folder_id)
-            await set_doc_margins(user["sub"], doc_data["id"])
+            doc_data = await create_styled_doc_in_folder(user["sub"], title, full_markdown, folder_id)
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
             yield "data: [DONE]\n\n"
