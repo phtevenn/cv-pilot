@@ -530,7 +530,7 @@ export const api = {
   },
 
   gdocsGenerateResume: (
-    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number; source_doc_id?: string | null },
+    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number; source_doc_id?: string | null; custom_instructions?: string | null },
     onEvent: (event: GDocGenerateEvent) => void,
   ): Promise<void> => {
     return new Promise((resolve, reject) => {
