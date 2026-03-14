@@ -191,6 +191,391 @@ def get_folder_id(user_id: str) -> Optional[str]:
 import html as _html
 import re as _re
 
+# ---------------------------------------------------------------------------
+# Google Docs API — native formatting helpers
+# ---------------------------------------------------------------------------
+
+_DOCS_API = "https://docs.googleapis.com/v1/documents"
+_CONTENT_WIDTH_PT = 504.0  # 8.5in page - 0.75in*2 margins = 7in = 504pt
+
+
+def _pt(n: float) -> dict:
+    return {"magnitude": n, "unit": "PT"}
+
+
+def _rgb(hex_color: str) -> dict:
+    h = hex_color.lstrip("#")
+    return {"red": int(h[0:2], 16) / 255.0, "green": int(h[2:4], 16) / 255.0, "blue": int(h[4:6], 16) / 255.0}
+
+
+def _opt_color(hex_color: str) -> dict:
+    return {"color": {"rgbColor": _rgb(hex_color)}}
+
+
+def _text_color(hex_color: str) -> dict:
+    return {"foregroundColor": _opt_color(hex_color)}
+
+
+def _parse_resume_segments(markdown_text: str) -> list[dict]:
+    """Parse markdown resume into typed segments for Docs API rendering."""
+    segs: list[dict] = []
+    lines = markdown_text.strip().split("\n")
+    header_done = False
+    name_seen = False
+    last_was_entry = False
+    current_section = ""
+
+    for raw in lines:
+        s = raw.strip()
+
+        if not s:
+            if segs and segs[-1]["type"] != "blank":
+                segs.append({"type": "blank"})
+            last_was_entry = False
+            continue
+
+        # H1/H2 → name
+        h = _re.match(r"^#{1,2}\s+(.+)$", s)
+        if h:
+            text = _re.sub(r"\*\*(.+?)\*\*", r"\1", h.group(1))
+            segs.append({"type": "name", "text": text})
+            name_seen = True
+            last_was_entry = False
+            continue
+
+        # Section header: **ALL CAPS** alone on line
+        sec = _re.match(r"^\*\*([A-Z][A-Z0-9 /&()\-]+)\*\*\s*$", s)
+        if sec:
+            segs.append({"type": "section", "text": sec.group(1)})
+            header_done = True
+            current_section = sec.group(1).lower()
+            last_was_entry = False
+            continue
+
+        # Bullet point
+        if _re.match(r"^[-*•]\s+", s):
+            text = _re.sub(r"^[-*•]\s+", "", s)
+            text = _re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+            segs.append({"type": "bullet", "text": text})
+            last_was_entry = False
+            continue
+
+        # Pre-section header block (name + contact)
+        if not header_done:
+            if (
+                "|" in s or "@" in s
+                or _re.search(r"\d{3}[-.)]\d{3}", s)
+                or _re.search(r"linkedin|github|http", s, _re.I)
+            ):
+                text = " • ".join(p.strip() for p in s.split("|") if p.strip())
+                text = _re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+                segs.append({"type": "contact", "text": text})
+                last_was_entry = False
+                continue
+            if not name_seen:
+                text = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+                segs.append({"type": "name", "text": text})
+                name_seen = True
+                last_was_entry = False
+                continue
+
+        # Entry heading: bold + (year/present/current OR bullet/pipe separator)
+        if _re.search(r"\*\*", s) and (
+            _re.search(r"\b(19|20)\d{2}\b|present|current", s, _re.I)
+            or "•" in s or " | " in s
+        ):
+            plain = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+            if "•" in s:
+                raw_left, _, raw_right = s.partition("•")
+                left = _re.sub(r"\*\*(.+?)\*\*", r"\1", raw_left).strip()
+                right = _re.sub(r"\*\*(.+?)\*\*", r"\1", raw_right).strip()
+            elif " | " in plain:
+                idx = plain.rfind(" | ")
+                left = plain[:idx].strip()
+                right = plain[idx + 3:].strip()
+            else:
+                left = plain.strip()
+                right = ""
+            segs.append({"type": "entry", "left": left, "right": right})
+            last_was_entry = True
+            continue
+
+        # Job title: first non-blank non-bullet line after an entry heading
+        if last_was_entry:
+            text = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+            segs.append({"type": "jobtitle", "text": text})
+            last_was_entry = False
+            continue
+
+        # Skills section
+        if any(kw in current_section for kw in ("skill", "technical", "competenc", "tool")):
+            m = _re.match(r"^([^:]{2,35}):\s+(.+)$", s)
+            if m:
+                segs.append({"type": "skill", "label": m.group(1).strip(), "value": m.group(2).strip()})
+                last_was_entry = False
+                continue
+
+        # Default body
+        text = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+        segs.append({"type": "body", "text": text})
+        last_was_entry = False
+
+    return segs
+
+
+def _build_docs_requests(markdown_text: str) -> list:
+    """Build Google Docs API batchUpdate requests to format a resume from markdown."""
+    segs = _parse_resume_segments(markdown_text)
+
+    # Build full plain text and track [start, end) positions per segment
+    # Docs API body starts at index 1
+    full_text = ""
+    seg_info: list[tuple[int, int, dict]] = []
+    pos = 1
+
+    for seg in segs:
+        stype = seg["type"]
+        if stype == "blank":
+            full_text += "\n"
+            seg_info.append((pos, pos + 1, seg))
+            pos += 1
+        elif stype == "entry":
+            left, right = seg["left"], seg.get("right", "")
+            if right:
+                text = f"{left}\t{right}\n"
+                seg = {**seg, "_tab_pos": pos + len(left)}
+            else:
+                text = f"{left}\n"
+                seg = {**seg, "_tab_pos": None}
+            seg_info.append((pos, pos + len(text), seg))
+            full_text += text
+            pos += len(text)
+        elif stype == "skill":
+            text = f"{seg['label']}: {seg['value']}\n"
+            seg = {**seg, "_label_end": pos + len(seg["label"]) + 1}  # +1 for ':'
+            seg_info.append((pos, pos + len(text), seg))
+            full_text += text
+            pos += len(text)
+        else:
+            text = seg.get("text", "") + "\n"
+            seg_info.append((pos, pos + len(text), seg))
+            full_text += text
+            pos += len(text)
+
+    requests: list[dict] = []
+
+    # 1. Document margins
+    requests.append({
+        "updateDocumentStyle": {
+            "documentStyle": {
+                "marginTop": _pt(54), "marginBottom": _pt(54),
+                "marginLeft": _pt(54), "marginRight": _pt(54),
+            },
+            "fields": "marginTop,marginBottom,marginLeft,marginRight",
+        }
+    })
+
+    # 2. Insert all text at once at index 1
+    requests.append({
+        "insertText": {"location": {"index": 1}, "text": full_text}
+    })
+
+    # 3. Per-segment formatting
+    for start, end, seg in seg_info:
+        stype = seg["type"]
+        if stype == "blank":
+            continue
+        content_end = end - 1  # exclude trailing \n for text style
+        if content_end <= start:
+            continue
+
+        if stype == "name":
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": True, "fontSize": _pt(16),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#111827"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "alignment": "CENTER", "spaceAbove": _pt(0), "spaceBelow": _pt(2),
+                }, "fields": "alignment,spaceAbove,spaceBelow"}},
+            ]
+
+        elif stype == "contact":
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": False, "fontSize": _pt(9),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#6b7280"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "alignment": "CENTER", "spaceAbove": _pt(0), "spaceBelow": _pt(10),
+                }, "fields": "alignment,spaceAbove,spaceBelow"}},
+            ]
+
+        elif stype == "section":
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": True, "fontSize": _pt(8.5),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#374151"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "spaceAbove": _pt(12), "spaceBelow": _pt(3),
+                    "borderBottom": {
+                        "color": _opt_color("#9ca3af"),
+                        "width": _pt(0.75), "dashStyle": "SOLID", "padding": _pt(2),
+                    },
+                }, "fields": "spaceAbove,spaceBelow,borderBottom"}},
+            ]
+
+        elif stype == "entry":
+            tab_pos = seg.get("_tab_pos")
+            if tab_pos and tab_pos > start:
+                requests += [
+                    {"updateTextStyle": {"range": {"startIndex": start, "endIndex": tab_pos}, "textStyle": {
+                        "bold": True, "fontSize": _pt(10.5),
+                        "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#111827"),
+                    }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+                    {"updateTextStyle": {"range": {"startIndex": tab_pos + 1, "endIndex": content_end}, "textStyle": {
+                        "bold": False, "fontSize": _pt(9),
+                        "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#6b7280"),
+                    }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+                ]
+            else:
+                requests.append({"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": True, "fontSize": _pt(10.5),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#111827"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}})
+            requests.append({"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                "tabStops": [{"offset": _pt(_CONTENT_WIDTH_PT), "alignment": "END"}],
+                "spaceAbove": _pt(6), "spaceBelow": _pt(1),
+            }, "fields": "tabStops,spaceAbove,spaceBelow"}})
+
+        elif stype == "jobtitle":
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": False, "italic": True, "fontSize": _pt(10),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#4b5563"),
+                }, "fields": "bold,italic,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "spaceAbove": _pt(0), "spaceBelow": _pt(2),
+                }, "fields": "spaceAbove,spaceBelow"}},
+            ]
+
+        elif stype == "bullet":
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": False, "italic": False, "fontSize": _pt(10),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#374151"),
+                }, "fields": "bold,italic,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "spaceBelow": _pt(1.5),
+                }, "fields": "spaceBelow"}},
+            ]
+
+        elif stype == "skill":
+            label_end = seg.get("_label_end", start + 5)
+            label_end = min(label_end, content_end)
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": label_end}, "textStyle": {
+                    "bold": True, "fontSize": _pt(10),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#111827"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}},
+            ]
+            if label_end < content_end:
+                requests.append({"updateTextStyle": {"range": {"startIndex": label_end, "endIndex": content_end}, "textStyle": {
+                    "bold": False, "fontSize": _pt(10),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#374151"),
+                }, "fields": "bold,fontSize,weightedFontFamily,foregroundColor"}})
+            requests.append({"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                "spaceAbove": _pt(0), "spaceBelow": _pt(2),
+            }, "fields": "spaceAbove,spaceBelow"}})
+
+        else:  # body
+            requests += [
+                {"updateTextStyle": {"range": {"startIndex": start, "endIndex": content_end}, "textStyle": {
+                    "bold": False, "italic": False, "fontSize": _pt(10),
+                    "weightedFontFamily": {"fontFamily": "Arial"}, **_text_color("#374151"),
+                }, "fields": "bold,italic,fontSize,weightedFontFamily,foregroundColor"}},
+                {"updateParagraphStyle": {"range": {"startIndex": start, "endIndex": end}, "paragraphStyle": {
+                    "spaceAbove": _pt(0), "spaceBelow": _pt(3),
+                }, "fields": "spaceAbove,spaceBelow"}},
+            ]
+
+    # 4. Apply native bullet formatting to all bullet paragraphs
+    bullet_ranges = [(s, e) for s, e, sg in seg_info if sg["type"] == "bullet"]
+    if bullet_ranges:
+        g_start, g_end = bullet_ranges[0]
+        for s, e in bullet_ranges[1:]:
+            if s == g_end:
+                g_end = e
+            else:
+                requests.append({"createParagraphBullets": {
+                    "range": {"startIndex": g_start, "endIndex": g_end},
+                    "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE",
+                }})
+                g_start, g_end = s, e
+        requests.append({"createParagraphBullets": {
+            "range": {"startIndex": g_start, "endIndex": g_end},
+            "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE",
+        }})
+
+    return requests
+
+
+async def create_styled_doc_in_folder(user_id: str, title: str, markdown_text: str, folder_id: str) -> dict:
+    """Create a Google Doc using the Docs API with native formatting. Returns Drive file metadata."""
+    access_token = await _get_valid_access_token(user_id)
+
+    # Step 1: Create empty doc via Docs API
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            _DOCS_API,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={"title": title},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        doc_id = resp.json()["documentId"]
+
+    # Step 2: Move to the CV Pilot folder
+    async with httpx.AsyncClient() as client:
+        meta = await client.get(
+            f"{_DRIVE_FILES_URL}/{doc_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"fields": "parents"},
+        )
+        meta.raise_for_status()
+        parents = meta.json().get("parents", [])
+        move = await client.patch(
+            f"{_DRIVE_FILES_URL}/{doc_id}",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            params={"addParents": folder_id, "removeParents": ",".join(parents),
+                    "fields": "id,webViewLink,createdTime,modifiedTime"},
+            json={},
+            timeout=30,
+        )
+        move.raise_for_status()
+        file_meta = move.json()
+
+    # Step 3: Insert content and apply formatting in one batchUpdate
+    batch_requests = _build_docs_requests(markdown_text)
+    async with httpx.AsyncClient() as client:
+        update = await client.post(
+            f"{_DOCS_API}/{doc_id}:batchUpdate",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={"requests": batch_requests},
+            timeout=60,
+        )
+        if update.status_code != 200:
+            print(f"[gdocs] batchUpdate failed ({update.status_code}): {update.text[:500]}")
+
+    return {
+        "id": doc_id,
+        "name": title,
+        "webViewLink": file_meta.get("webViewLink", f"https://docs.google.com/document/d/{doc_id}/edit"),
+        "createdTime": file_meta.get("createdTime", ""),
+        "modifiedTime": file_meta.get("modifiedTime", ""),
+    }
+
 
 def _strip_inline_bold(text: str) -> str:
     return _re.sub(r'\*\*(.+?)\*\*', r'\1', text)
