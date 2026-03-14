@@ -212,6 +212,7 @@ async def generate_resume(
     category_id: Optional[str] = body.get("category_id") or None
     page_limit: int = max(1, min(int(body.get("page_limit", 1)), 5))
     source_doc_id: Optional[str] = body.get("source_doc_id") or None
+    custom_instructions: str = (body.get("custom_instructions") or "").strip()
 
     if not job_description.strip():
         raise HTTPException(status_code=422, detail="job_description is required")
@@ -239,6 +240,8 @@ async def generate_resume(
         page_limit_plural="s" if page_limit > 1 else "",
     )
     user_message = f"## Resume\n\n{base_resume}\n\n## Job Description\n\n{job_description}"
+    if custom_instructions:
+        user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
 
     async def event_stream():
         yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating tailored resume with AI\u2026'})}\n\n"

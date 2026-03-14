@@ -178,6 +178,7 @@ interface NewResumeModalProps {
 function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps) {
   const [title, setTitle] = useState('')
   const [jobDescription, setJobDescription] = useState('')
+  const [customInstructions, setCustomInstructions] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
   const [pageLimit, setPageLimit] = useState<number>(1)
   const [sourceDocUrl, setSourceDocUrl] = useState('')
@@ -207,6 +208,7 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
           category_id: categoryId || null,
           page_limit: pageLimit,
           source_doc_id: sourceDocId,
+          custom_instructions: customInstructions.trim() || null,
         },
         (event: GDocGenerateEvent) => {
           if (event.status === 'generating') {
@@ -295,6 +297,20 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
               onChange={(e) => setJobDescription(e.target.value)}
               placeholder="Paste the full job description here…"
               rows={8}
+              disabled={generating}
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors resize-none disabled:opacity-50"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">
+              Custom Instructions <span className="text-gray-500 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={customInstructions}
+              onChange={(e) => setCustomInstructions(e.target.value)}
+              placeholder="e.g. Emphasize leadership experience, keep education section brief, highlight Python skills..."
+              rows={3}
               disabled={generating}
               className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors resize-none disabled:opacity-50"
             />
