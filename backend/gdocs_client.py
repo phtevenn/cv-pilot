@@ -214,21 +214,41 @@ def _inline_md_to_html(text: str) -> str:
 
 def markdown_to_resume_html(markdown_text: str) -> str:
     """Convert Claude's resume markdown to styled HTML suitable for Google Docs import."""
-    CSS = """
-@page { margin: 0.75in; }
-body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #000; line-height: 1.35; margin: 0; }
-.rn { font-size: 18pt; font-weight: bold; text-align: center; margin: 0 0 3pt 0; }
-.rc { font-size: 10pt; text-align: center; color: #444; margin: 0 0 10pt 0; }
-.rs { font-size: 11pt; font-weight: bold; border-bottom: 1.5pt solid #222; margin: 10pt 0 3pt 0; padding-bottom: 2pt; letter-spacing: 0.03em; }
-.rr { font-size: 10.5pt; margin: 4pt 0 1pt 0; }
-ul { margin: 1pt 0 4pt 0; padding-left: 16pt; }
-li { font-size: 10.5pt; margin-bottom: 1.5pt; }
-p { margin: 0 0 3pt 0; font-size: 10.5pt; }
-"""
+    CSS = "@page { margin: 0.75in; }"
+
+    _DATE_PAT = _re.compile(r'\b(19|20)\d{2}\b|present|current', _re.I)
+    _ENTRY_HEADING_PAT = _re.compile(r'\*\*')
+
+    def _is_entry_heading(line: str) -> bool:
+        """True if line has bold AND (a year/present/current OR a bullet/pipe separator)."""
+        if not _ENTRY_HEADING_PAT.search(line):
+            return False
+        return bool(_DATE_PAT.search(line)) or '•' in line or ' | ' in line
+
+    def _split_entry_heading(line: str) -> tuple[str, str]:
+        """Split entry heading into (left, right) for table rendering."""
+        # Try bullet separator first
+        if '•' in line:
+            idx = line.index('•')
+            left_raw = line[:idx].strip()
+            right_raw = line[idx + 1:].strip()
+            return left_raw, right_raw
+        # Try last ' | ' separator
+        last_pipe = line.rfind(' | ')
+        if last_pipe != -1:
+            left_raw = line[:last_pipe].strip()
+            right_raw = line[last_pipe + 3:].strip()
+            return left_raw, right_raw
+        # No clear split — return full line as left, empty right
+        return line, ''
+
     lines = markdown_text.strip().split('\n')
     parts: list[str] = []
     in_ul = False
-    header_done = False  # True once we've seen the first section header
+    header_done = False       # True once we've seen the first section header
+    name_seen = False
+    current_section = ''      # lowercase section name for context-aware rendering
+    last_was_entry_heading = False  # True if previous meaningful line was an entry heading
 
     def close_ul() -> None:
         nonlocal in_ul
@@ -239,10 +259,10 @@ p { margin: 0 0 3pt 0; font-size: 10.5pt; }
     def open_ul() -> None:
         nonlocal in_ul
         if not in_ul:
-            parts.append('<ul>')
+            parts.append(
+                '<ul style="margin:1pt 0 4pt 0; padding-left:16pt;">'
+            )
             in_ul = True
-
-    name_seen = False
 
     for raw in lines:
         s = raw.strip()
@@ -257,64 +277,150 @@ p { margin: 0 0 3pt 0; font-size: 10.5pt; }
         if h_match:
             close_ul()
             name_text = _strip_inline_bold(h_match.group(1))
-            parts.append(f'<p class="rn">{_html.escape(name_text)}</p>')
+            parts.append(
+                f'<p style="font-size:16.5pt; font-weight:700; text-align:center;'
+                f' text-transform:uppercase; letter-spacing:0.18em; color:#111827;'
+                f' margin:0 0 2pt 0;">{_html.escape(name_text)}</p>'
+            )
             name_seen = True
+            last_was_entry_heading = False
             continue
 
         # Section header: **ALL CAPS** on its own line (may include spaces, /, &, (, ))
         sec_match = _re.match(r'^\*\*([A-Z][A-Z0-9 /&()\-]+)\*\*\s*$', s)
         if sec_match:
             close_ul()
-            parts.append(f'<p class="rs">{_html.escape(sec_match.group(1))}</p>')
+            sec_text = sec_match.group(1)
+            current_section = sec_text.lower().strip()
+            parts.append(
+                f'<p style="font-size:8pt; font-weight:700; text-transform:uppercase;'
+                f' letter-spacing:0.14em; color:#374151;'
+                f' border-bottom:0.75pt solid #9ca3af;'
+                f' margin:12pt 0 3pt 0; padding-bottom:2pt;">'
+                f'{_html.escape(sec_text)}</p>'
+            )
             header_done = True
+            last_was_entry_heading = False
             continue
 
         # Bullet point
         if _re.match(r'^[-*•]\s+', s):
             open_ul()
             text = _re.sub(r'^[-*•]\s+', '', s)
-            parts.append(f'<li>{_inline_md_to_html(text)}</li>')
+            parts.append(
+                f'<li style="font-size:10pt; color:#374151;'
+                f' line-height:1.35; margin-bottom:1.5pt;">'
+                f'{_inline_md_to_html(text)}</li>'
+            )
+            last_was_entry_heading = False
             continue
 
         close_ul()
 
-        # Contact info: in the header block and contains | or @ or phone pattern
-        if not header_done and (
-            '|' in s or '@' in s
-            or _re.search(r'\d{3}[-.)]\d{3}', s)
-            or _re.search(r'linkedin|github|http', s, _re.I)
-        ):
-            pieces = [p.strip() for p in s.split('|')]
-            contact_html = ' • '.join(_html.escape(p) for p in pieces if p)
-            parts.append(f'<p class="rc">{contact_html}</p>')
-            continue
-
-        # Name (bold only, before first section header, no name yet)
-        if not header_done and not name_seen:
-            bold_name = _re.match(r'^\*\*(.+)\*\*$', s)
-            if bold_name:
-                parts.append(f'<p class="rn">{_html.escape(bold_name.group(1))}</p>')
-                name_seen = True
-                continue
-            # Plain first line before contact info → treat as name
-            if not _re.search(r'[|@•]', s):
-                parts.append(f'<p class="rn">{_html.escape(s)}</p>')
-                name_seen = True
+        # --- Header block (before first section header) ---
+        if not header_done:
+            # Contact info: contains | or @ or phone pattern or common link keywords
+            if (
+                '|' in s or '@' in s
+                or _re.search(r'\d{3}[-.)]\d{3}', s)
+                or _re.search(r'linkedin|github|http', s, _re.I)
+            ):
+                pieces = [p.strip() for p in s.split('|')]
+                contact_html = ' • '.join(_html.escape(p) for p in pieces if p)
+                parts.append(
+                    f'<p style="font-size:8.5pt; text-align:center; color:#6b7280;'
+                    f' margin:0 0 10pt 0; letter-spacing:0.025em;">'
+                    f'{contact_html}</p>'
+                )
+                last_was_entry_heading = False
                 continue
 
-        # Role/subheading lines (have bold or pipe separator after header block)
-        if _re.search(r'\*\*', s) or ('|' in s and header_done):
-            parts.append(f'<p class="rr">{_inline_md_to_html(s)}</p>')
+            # Name (bold or plain, before first section header, no name yet)
+            if not name_seen:
+                bold_name = _re.match(r'^\*\*(.+)\*\*$', s)
+                if bold_name:
+                    parts.append(
+                        f'<p style="font-size:16.5pt; font-weight:700; text-align:center;'
+                        f' text-transform:uppercase; letter-spacing:0.18em; color:#111827;'
+                        f' margin:0 0 2pt 0;">{_html.escape(bold_name.group(1))}</p>'
+                    )
+                    name_seen = True
+                    last_was_entry_heading = False
+                    continue
+                if not _re.search(r'[|@•]', s):
+                    parts.append(
+                        f'<p style="font-size:16.5pt; font-weight:700; text-align:center;'
+                        f' text-transform:uppercase; letter-spacing:0.18em; color:#111827;'
+                        f' margin:0 0 2pt 0;">{_html.escape(s)}</p>'
+                    )
+                    name_seen = True
+                    last_was_entry_heading = False
+                    continue
+
+        # --- Body section lines ---
+
+        # Entry heading: bold + year/present/current or separator
+        if _is_entry_heading(s):
+            left_raw, right_raw = _split_entry_heading(s)
+            left_html = _inline_md_to_html(left_raw)
+            right_html = _inline_md_to_html(right_raw) if right_raw else ''
+            if right_html:
+                parts.append(
+                    f'<table width="100%" cellpadding="0" cellspacing="0"'
+                    f' style="border-collapse:collapse; margin:6pt 0 1pt 0;">'
+                    f'<tr>'
+                    f'<td style="font-size:10.5pt; font-weight:600; color:#111827;">'
+                    f'{left_html}</td>'
+                    f'<td style="font-size:9pt; color:#6b7280; text-align:right;'
+                    f' white-space:nowrap; vertical-align:top;">'
+                    f'{right_html}</td>'
+                    f'</tr></table>'
+                )
+            else:
+                parts.append(
+                    f'<p style="font-size:10.5pt; font-weight:600; color:#111827;'
+                    f' margin:6pt 0 1pt 0;">{left_html}</p>'
+                )
+            last_was_entry_heading = True
             continue
+
+        # Job title: non-empty, non-bullet, non-section-header line immediately after entry heading
+        if last_was_entry_heading:
+            parts.append(
+                f'<p style="font-size:10pt; font-style:italic; color:#4b5563;'
+                f' margin:0 0 2pt 0;">{_inline_md_to_html(s)}</p>'
+            )
+            last_was_entry_heading = False
+            continue
+
+        # Skills section: Label: value(s) pattern
+        if any(kw in current_section for kw in ('skill', 'technical')):
+            skill_match = _re.match(r'^([^:]{2,30}):\s+(.+)$', s)
+            if skill_match:
+                label = _html.escape(skill_match.group(1))
+                value = _html.escape(skill_match.group(2))
+                parts.append(
+                    f'<p style="font-size:10pt; margin:0 0 2pt 0;">'
+                    f'<strong style="font-weight:600; color:#111827;">{label}:</strong>'
+                    f' <span style="color:#374151;">{value}</span></p>'
+                )
+                continue
 
         # Default body paragraph
-        parts.append(f'<p>{_inline_md_to_html(s)}</p>')
+        parts.append(
+            f'<p style="font-size:10pt; color:#374151; margin:0 0 3pt 0;">'
+            f'{_inline_md_to_html(s)}</p>'
+        )
+        last_was_entry_heading = False
 
     close_ul()
     content = '\n'.join(parts)
     return (
         '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        f'<style>{CSS}</style></head><body>{content}</body></html>'
+        f'<style>{CSS}</style>'
+        f'<body style="font-family:Arial,sans-serif; font-size:10pt; color:#374151;'
+        f' line-height:1.35; margin:0;">'
+        f'{content}</body></html>'
     )
 
 
