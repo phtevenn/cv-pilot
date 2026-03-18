@@ -122,7 +122,7 @@ export interface GDocResumeMeta {
 }
 
 export interface GDocGenerateEvent {
-  status: 'generating' | 'creating_doc' | 'done' | 'error'
+  status: 'exporting' | 'analyzing' | 'generating' | 'creating_doc' | 'done' | 'error'
   message?: string
   // present when status === 'done':
   id?: string
@@ -529,8 +529,23 @@ export const api = {
     })
   },
 
+  gdocsDownloadResume: (docId: string, title: string): void => {
+    const url = `${API_BASE}/api/gdocs/resumes/${docId}/download`
+    const a = document.createElement('a')
+    a.href = url
+    fetch(url, { headers: authHeaders() })
+      .then(r => r.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob)
+        a.href = blobUrl
+        a.download = `${title}.docx`
+        a.click()
+        URL.revokeObjectURL(blobUrl)
+      })
+  },
+
   gdocsGenerateResume: (
-    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number; source_doc_id?: string | null; custom_instructions?: string | null },
+    params: { title: string; job_description: string; category_id?: string | null; source_doc_id?: string | null; custom_instructions?: string | null },
     onEvent: (event: GDocGenerateEvent) => void,
   ): Promise<void> => {
     return new Promise((resolve, reject) => {

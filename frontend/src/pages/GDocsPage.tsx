@@ -84,9 +84,10 @@ interface ResumeCardMenuProps {
   onRename: (resume: GDocResumeMeta) => void
   onMove: (resume: GDocResumeMeta, categoryId: string | null) => void
   onDelete: (resume: GDocResumeMeta) => void
+  onDownload: (resume: GDocResumeMeta) => void
 }
 
-function ResumeCardMenu({ resume, categories, onRename, onMove, onDelete }: ResumeCardMenuProps) {
+function ResumeCardMenu({ resume, categories, onRename, onMove, onDelete, onDownload }: ResumeCardMenuProps) {
   const [open, setOpen] = useState(false)
   const [showMoveSubmenu, setShowMoveSubmenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -153,6 +154,12 @@ function ResumeCardMenu({ resume, categories, onRename, onMove, onDelete }: Resu
               </div>
             )}
           </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen(false); onDownload(resume) }}
+            className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition-colors"
+          >
+            Download DOCX
+          </button>
           <div className="border-t border-gray-700 my-1" />
           <button
             onClick={(e) => { e.stopPropagation(); setOpen(false); onDelete(resume) }}
@@ -180,7 +187,6 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
   const [jobDescription, setJobDescription] = useState('')
   const [customInstructions, setCustomInstructions] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
-  const [pageLimit, setPageLimit] = useState<number>(1)
   const [sourceDocUrl, setSourceDocUrl] = useState('')
   const [generating, setGenerating] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
@@ -206,12 +212,15 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
           title: title.trim(),
           job_description: jobDescription.trim(),
           category_id: categoryId || null,
-          page_limit: pageLimit,
           source_doc_id: sourceDocId,
           custom_instructions: customInstructions.trim() || null,
         },
         (event: GDocGenerateEvent) => {
-          if (event.status === 'generating') {
+          if (event.status === 'exporting') {
+            setStatusMessage(event.message ?? 'Exporting source document…')
+          } else if (event.status === 'analyzing') {
+            setStatusMessage(event.message ?? 'Analyzing resume and job description…')
+          } else if (event.status === 'generating') {
             setStatusMessage(event.message ?? 'Generating tailored resume with AI…')
           } else if (event.status === 'creating_doc') {
             setStatusMessage(event.message ?? 'Creating Google Doc…')
@@ -264,6 +273,19 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
         {/* Body */}
         <div className="px-5 py-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh]">
           <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">Source Resume (Google Doc URL)</label>
+            <input
+              type="url"
+              value={sourceDocUrl}
+              onChange={(e) => setSourceDocUrl(e.target.value)}
+              placeholder="https://docs.google.com/document/d/…"
+              disabled={generating}
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
+            />
+            <p className="text-gray-500 text-xs">Paste the URL of the Google Doc resume to base this on. If blank, your saved resume in the editor will be used.</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
             <label className="text-gray-300 text-sm font-medium">Resume Title</label>
             <input
               type="text"
@@ -273,21 +295,6 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
               disabled={generating}
               className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
             />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-gray-300 text-sm font-medium">
-              Starting Resume <span className="text-gray-500 font-normal">(optional)</span>
-            </label>
-            <input
-              type="url"
-              value={sourceDocUrl}
-              onChange={(e) => setSourceDocUrl(e.target.value)}
-              placeholder="Paste a Google Docs URL, or leave blank to use your current resume"
-              disabled={generating}
-              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
-            />
-            <p className="text-gray-500 text-xs">If blank, your saved resume in the editor will be used as the starting point.</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -316,35 +323,19 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
             />
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-gray-300 text-sm font-medium">Category</label>
-              <select
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                disabled={generating}
-                className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
-              >
-                <option value="">No Category</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-gray-300 text-sm font-medium">Page Limit</label>
-              <select
-                value={pageLimit}
-                onChange={(e) => setPageLimit(Number(e.target.value))}
-                disabled={generating}
-                className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
-              >
-                <option value={1}>1 page</option>
-                <option value={2}>2 pages</option>
-                <option value={3}>3 pages</option>
-              </select>
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-gray-300 text-sm font-medium">Category</label>
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              disabled={generating}
+              className="bg-gray-800 border border-gray-600 hover:border-gray-500 focus:border-indigo-500 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors disabled:opacity-50"
+            >
+              <option value="">No Category</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
           </div>
 
           {generating && statusMessage && (
@@ -841,6 +832,7 @@ export default function GDocsPage() {
                         onRename={setRenameTarget}
                         onMove={handleMove}
                         onDelete={setDeleteTarget}
+                        onDownload={(r) => api.gdocsDownloadResume(r.id, r.title)}
                       />
                     </div>
                   </div>
@@ -866,6 +858,16 @@ export default function GDocsPage() {
                   <p className="text-gray-500 text-xs hidden md:block">
                     Make sure you're logged in to Google in your browser.
                   </p>
+                  <button
+                    onClick={() => api.gdocsDownloadResume(selectedResume.id, selectedResume.title)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg transition-colors"
+                    aria-label="Download DOCX"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download DOCX
+                  </button>
                   <a
                     href={selectedResume.google_doc_url}
                     target="_blank"
