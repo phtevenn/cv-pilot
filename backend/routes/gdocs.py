@@ -1,10 +1,11 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlmodel import Session, select
 
 from database import GDocCategory, GDocResume, get_engine
@@ -12,8 +13,9 @@ from deps import get_current_user
 from gdocs_client import (
     create_styled_doc_in_folder,
     delete_drive_file,
+    export_doc_as_docx,
     fetch_doc_as_text,
-    get_folder_id,
+    generate_resume_docx,
     get_or_create_folder,
     has_drive_access,
     list_docs_in_folder,
@@ -198,17 +200,33 @@ Trim less-relevant bullet points or shorten descriptions as needed — do NOT re
 """
 
 
+def _markdown_to_docx_bytes(markdown_text: str) -> bytes:
+    """
+    Convert a plain-text or markdown resume to DOCX bytes using python-docx.
+    This is a simple fallback for when no source Google Doc is provided.
+    Formatting is basic (plain paragraphs); the purpose is structural, not aesthetic.
+    """
+    from docx import Document as DocxDocument
+
+    doc = DocxDocument()
+    for line in markdown_text.split("\n"):
+        doc.add_paragraph(line)
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
 @router.post("/resumes/generate")
 async def generate_resume(
     request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
-    """SSE stream: Claude generates resume → creates Google Doc → returns metadata."""
+    """SSE stream: DOCX pipeline generates resume → creates Google Doc → returns metadata."""
     body = await request.json()
     title: str = body.get("title", "Tailored Resume").strip() or "Tailored Resume"
     job_description: str = body.get("job_description", "")
     category_id: Optional[str] = body.get("category_id") or None
-    page_limit: int = max(1, min(int(body.get("page_limit", 1)), 5))
     source_doc_id: Optional[str] = body.get("source_doc_id") or None
     custom_instructions: str = (body.get("custom_instructions") or "").strip()
 
@@ -218,68 +236,54 @@ async def generate_resume(
     if not has_drive_access(user["sub"]):
         raise HTTPException(status_code=403, detail="Google Drive not connected")
 
-    # Load base resume: from a source Google Doc if provided, else the editor resume
-    import storage
-    if source_doc_id:
-        try:
-            base_resume = await fetch_doc_as_text(user["sub"], source_doc_id)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Could not read source Google Doc: {e}")
-    else:
-        base_resume = storage.load_resume(user["sub"])
-
     try:
-        client, model = get_client("optimize")
+        llm_client, llm_model = get_client("optimize")
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        page_limit=page_limit,
-        page_limit_plural="s" if page_limit > 1 else "",
-    )
-    user_message = f"## Resume\n\n{base_resume}\n\n## Job Description\n\n{job_description}"
-    if custom_instructions:
-        user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
-
     async def event_stream():
-        yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating tailored resume with AI\u2026'})}\n\n"
+        # Step 1: export or build source DOCX
+        source_docx_bytes: Optional[bytes] = None
+        if source_doc_id:
+            yield f"data: {json.dumps({'status': 'exporting', 'message': 'Exporting source document\u2026'})}\n\n"
+            try:
+                source_docx_bytes = await export_doc_as_docx(user["sub"], source_doc_id)
+            except Exception as e:
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Could not export source doc: {e}'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        else:
+            yield f"data: {json.dumps({'status': 'exporting', 'message': 'Preparing resume\u2026'})}\n\n"
+            import storage
+            base_resume = storage.load_resume(user["sub"])
+            try:
+                source_docx_bytes = _markdown_to_docx_bytes(base_resume)
+            except Exception as e:
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Could not build DOCX from resume: {e}'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
-        # Collect full markdown from Claude
-        full_markdown = ""
-        try:
-            if isinstance(client, AsyncAnthropic):
-                async with client.messages.stream(
-                    model=model,
-                    max_tokens=4096,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_message}],
-                ) as stream:
-                    async for text in stream.text_stream:
-                        full_markdown += text
-            else:
-                stream = await client.chat.completions.create(
-                    model=model,
-                    max_tokens=4096,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    stream=True,
-                )
-                async for chunk in stream:
-                    text = chunk.choices[0].delta.content or ""
-                    full_markdown += text
-        except Exception as e:
-            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+        # Step 2: analyze sections
+        yield f"data: {json.dumps({'status': 'analyzing', 'message': 'Analyzing sections\u2026'})}\n\n"
 
+        # Step 3: generate optimized content
+        yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating optimized content\u2026'})}\n\n"
+
+        # Step 4: create Google Doc (runs steps 3-7 of the pipeline internally)
         yield f"data: {json.dumps({'status': 'creating_doc', 'message': 'Creating Google Doc\u2026'})}\n\n"
-
-        # Create the doc using the Docs API for reliable native formatting
         try:
             folder_id = await get_or_create_folder(user["sub"])
-            doc_data = await create_styled_doc_in_folder(user["sub"], title, full_markdown, folder_id)
+            doc_data = await generate_resume_docx(
+                user_id=user["sub"],
+                source_doc_id=None,  # already have bytes
+                source_docx_bytes=source_docx_bytes,
+                title=title,
+                job_description=job_description,
+                custom_instructions=custom_instructions,
+                folder_id=folder_id,
+                llm_client=llm_client,
+                llm_model=llm_model,
+            )
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
             yield "data: [DONE]\n\n"
@@ -346,6 +350,49 @@ async def update_resume(doc_id: str, request: Request, user: dict = Depends(get_
 
     cat_map = _load_category_map(user["sub"])
     return _drive_file_to_dict(f, cat_map.get(doc_id))
+
+
+@router.get("/resumes/{doc_id}/download")
+async def download_resume_docx(doc_id: str, user: dict = Depends(get_current_user)) -> Response:
+    """Download a Google Doc as a DOCX file."""
+    if not has_drive_access(user["sub"]):
+        raise HTTPException(status_code=403, detail="Google Drive not connected")
+
+    # Fetch title from Drive metadata or SQLite
+    title = "resume"
+    with Session(get_engine()) as session:
+        r = session.get(GDocResume, doc_id)
+        if r and r.user_id == user["sub"] and r.title:
+            title = r.title
+
+    # If title not in SQLite, fetch from Drive
+    if title == "resume":
+        try:
+            from gdocs_client import _get_valid_access_token
+            import httpx
+            access_token = await _get_valid_access_token(user["sub"])
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    f"https://www.googleapis.com/drive/v3/files/{doc_id}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={"fields": "name"},
+                )
+                if resp.status_code == 200:
+                    title = resp.json().get("name", "resume")
+        except Exception:
+            pass  # fall back to "resume"
+
+    try:
+        docx_bytes = await export_doc_as_docx(user["sub"], doc_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export document: {e}")
+
+    safe_title = title.replace('"', "'")
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.docx"'},
+    )
 
 
 @router.delete("/resumes/{doc_id}", status_code=204)
