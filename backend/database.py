@@ -79,7 +79,6 @@ def _run_migrations(engine) -> None:
             ))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_user_id ON gdoc_resumes (user_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_category_id ON gdoc_resumes (category_id)"))
-
         conn.commit()
 
 
@@ -187,3 +186,5 @@ class GDocResume(SQLModel, table=True):
     job_description: str = Field(default="")
     created_at: str
     updated_at: str
+
+
