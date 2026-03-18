@@ -10,8 +10,9 @@ from sqlmodel import Session, select
 
 from database import GDocCategory, GDocResume, get_engine
 from deps import get_current_user
+import httpx
 from gdocs_client import (
-    create_styled_doc_in_folder,
+    _get_valid_access_token,
     delete_drive_file,
     export_doc_as_docx,
     fetch_doc_as_text,
@@ -339,8 +340,6 @@ async def update_resume(doc_id: str, request: Request, user: dict = Depends(get_
         _upsert_category(user["sub"], doc_id, new_category or None)
 
     # Return updated metadata from Drive
-    from gdocs_client import _get_valid_access_token
-    import httpx
     access_token = await _get_valid_access_token(user["sub"])
     async with httpx.AsyncClient() as client:
         resp = await client.get(
@@ -371,8 +370,6 @@ async def download_resume_docx(doc_id: str, user: dict = Depends(get_current_use
     # If title not in SQLite, fetch from Drive
     if title == "resume":
         try:
-            from gdocs_client import _get_valid_access_token
-            import httpx
             access_token = await _get_valid_access_token(user["sub"])
             async with httpx.AsyncClient() as http_client:
                 resp = await http_client.get(
