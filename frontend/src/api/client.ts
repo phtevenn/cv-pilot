@@ -110,13 +110,6 @@ export interface GDocCategory {
   color: string
 }
 
-export interface GDocTemplate {
-  id: string
-  google_doc_id: string
-  name: string
-  created_at: string
-}
-
 export interface GDocResumeMeta {
   id: string
   google_doc_id: string
@@ -536,36 +529,8 @@ export const api = {
     })
   },
 
-  gdocsListTemplates: async () => {
-    const resp = await fetch(`${API_BASE}/api/gdocs/templates`, {
-      headers: { ...authHeaders() },
-    })
-    if (!resp.ok) throw new Error('Failed to list templates')
-    return resp.json() as Promise<{ templates: GDocTemplate[] }>
-  },
-
-  gdocsCreateTemplate: async (name: string, google_doc_url: string) => {
-    const resp = await fetch(`${API_BASE}/api/gdocs/templates`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ name, google_doc_url }),
-    })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: 'Failed to create template' }))
-      throw new Error((err as { detail?: string }).detail ?? 'Failed to create template')
-    }
-    return resp.json() as Promise<GDocTemplate>
-  },
-
-  gdocsDeleteTemplate: async (id: string) => {
-    await fetch(`${API_BASE}/api/gdocs/templates/${id}`, {
-      method: 'DELETE',
-      headers: { ...authHeaders() },
-    })
-  },
-
   gdocsGenerateResume: (
-    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number; source_doc_id?: string | null; custom_instructions?: string | null; template_doc_id?: string | null },
+    params: { title: string; job_description: string; category_id?: string | null; page_limit?: number; source_doc_id?: string | null; custom_instructions?: string | null },
     onEvent: (event: GDocGenerateEvent) => void,
   ): Promise<void> => {
     return new Promise((resolve, reject) => {
