@@ -79,19 +79,6 @@ def _run_migrations(engine) -> None:
             ))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_user_id ON gdoc_resumes (user_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_resumes_category_id ON gdoc_resumes (category_id)"))
-        if "gdoc_templates" not in existing_tables:
-            conn.execute(text(
-                "CREATE TABLE IF NOT EXISTS gdoc_templates ("
-                "id TEXT PRIMARY KEY, "
-                "user_id TEXT NOT NULL, "
-                "google_doc_id TEXT NOT NULL, "
-                "name TEXT NOT NULL, "
-                "created_at TEXT NOT NULL, "
-                "updated_at TEXT NOT NULL"
-                ")"
-            ))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gdoc_templates_user_id ON gdoc_templates (user_id)"))
-
         conn.commit()
 
 
@@ -201,12 +188,3 @@ class GDocResume(SQLModel, table=True):
     updated_at: str
 
 
-class GDocTemplate(SQLModel, table=True):
-    __tablename__ = "gdoc_templates"
-
-    id: str = Field(primary_key=True)      # UUID
-    user_id: str = Field(index=True)
-    google_doc_id: str
-    name: str
-    created_at: str
-    updated_at: str
