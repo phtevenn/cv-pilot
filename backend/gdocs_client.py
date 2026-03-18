@@ -823,6 +823,162 @@ async def fetch_doc_as_text(user_id: str, doc_id: str) -> str:
         return resp.text
 
 
+async def export_doc_as_docx(user_id: str, doc_id: str) -> bytes:
+    """Export a Google Doc as DOCX bytes using the Drive export API."""
+    access_token = await _get_valid_access_token(user_id)
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://www.googleapis.com/drive/v3/files/{doc_id}/export",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.content
+
+
+async def upload_docx_as_gdoc(
+    user_id: str,
+    docx_bytes: bytes,
+    title: str,
+    folder_id: str,
+) -> dict:
+    """
+    Upload DOCX bytes to Drive with convert=true to create a native Google Doc.
+    Returns Drive file metadata dict with id, webViewLink, createdTime, modifiedTime.
+    """
+    access_token = await _get_valid_access_token(user_id)
+
+    metadata = json.dumps({
+        "name": title,
+        "parents": [folder_id],
+        "mimeType": "application/vnd.google-apps.document",
+    })
+    boundary = "cv_pilot_docx_boundary"
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{metadata}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n"
+    ).encode("utf-8") + docx_bytes + f"\r\n--{boundary}--".encode("utf-8")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{_UPLOAD_URL}?uploadType=multipart&convert=true&fields=id,name,webViewLink,createdTime,modifiedTime",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": f"multipart/related; boundary={boundary}",
+            },
+            content=body,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def generate_resume_docx(
+    user_id: str,
+    source_doc_id: Optional[str],
+    source_docx_bytes: Optional[bytes],
+    title: str,
+    job_description: str,
+    custom_instructions: str,
+    folder_id: str,
+    llm_client,
+    llm_model: str,
+) -> dict:
+    """
+    Full DOCX-based resume generation pipeline.
+
+    1. Export or receive source DOCX bytes.
+    2. Extract sections via docx_utils.
+    3. Ask the LLM to rewrite content as structured JSON.
+    4. Apply new content back to a DOCX copy (preserving styles).
+    5. Upload the DOCX to Drive with convert=true to get a native Google Doc.
+
+    Returns Drive file metadata dict.
+    """
+    import docx_utils
+    from anthropic import AsyncAnthropic
+
+    # Step 1: obtain DOCX bytes
+    if source_docx_bytes is not None:
+        docx_bytes = source_docx_bytes
+    elif source_doc_id is not None:
+        docx_bytes = await export_doc_as_docx(user_id, source_doc_id)
+    else:
+        raise ValueError("Either source_doc_id or source_docx_bytes must be provided")
+
+    # Step 2: extract sections
+    sections = docx_utils.extract_sections(docx_bytes)
+
+    # Step 3: build LLM prompt
+    system_prompt = (
+        "You are a resume optimizer. Given a resume and job description, rewrite the resume "
+        "content to be optimized for the job. Preserve the exact section structure of the "
+        "original. Return ONLY valid JSON in this format: "
+        "{\"sections\": [{\"heading\": \"<exact heading from original>\", "
+        "\"content\": \"<rewritten content as plain text, use newlines for multiple items>\"}]}. "
+        "Preserve all sections. Do not add or remove sections. If custom instructions mention "
+        "formatting improvements, you may adjust content style but keep structure."
+    )
+
+    sections_text = ""
+    for sec in sections:
+        heading = sec["heading"]
+        paras = "\n".join(p for p in sec["paragraphs"] if p)
+        sections_text += f"\n\n### {heading}\n{paras}"
+
+    user_message = (
+        f"## Resume Sections\n{sections_text}\n\n"
+        f"## Job Description\n\n{job_description}"
+    )
+    if custom_instructions:
+        user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
+
+    # Step 4: call LLM (non-streaming)
+    full_output = ""
+    if isinstance(llm_client, AsyncAnthropic):
+        response = await llm_client.messages.create(
+            model=llm_model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        full_output = response.content[0].text
+    else:
+        # OpenAI-compatible client
+        response = await llm_client.chat.completions.create(
+            model=llm_model,
+            max_tokens=4096,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        full_output = response.choices[0].message.content or ""
+
+    # Step 5: parse JSON response
+    try:
+        cleaned = full_output.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+        result_json = json.loads(cleaned)
+        llm_sections = result_json.get("sections", [])
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise ValueError(f"LLM returned invalid JSON: {exc}\n\nRaw output:\n{full_output[:500]}")
+
+    # Step 6: apply new content to DOCX
+    new_docx_bytes = docx_utils.apply_sections_to_docx(docx_bytes, llm_sections)
+
+    # Step 7: upload to Drive
+    doc_data = await upload_docx_as_gdoc(user_id, new_docx_bytes, title, folder_id)
+    return doc_data
+
+
 async def set_doc_margins(user_id: str, doc_id: str) -> None:
     """Use the Google Docs API to set 0.75in page margins. Non-fatal on failure."""
     try:
