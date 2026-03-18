@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
+from anthropic import AsyncAnthropic
 from sqlmodel import Session
 
 from database import UserGoogleToken, get_engine
@@ -900,7 +901,6 @@ async def generate_resume_docx(
     Returns Drive file metadata dict.
     """
     import docx_utils
-    from anthropic import AsyncAnthropic
 
     # Step 1: obtain DOCX bytes
     if source_docx_bytes is not None:
