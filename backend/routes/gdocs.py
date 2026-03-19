@@ -16,7 +16,7 @@ from gdocs_client import (
     delete_drive_file,
     export_doc_as_docx,
     fetch_doc_as_text,
-    generate_resume_docx,
+    generate_resume_native,
     get_or_create_folder,
     has_drive_access,
     list_docs_in_folder,
@@ -226,7 +226,7 @@ async def generate_resume(
     request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
-    """SSE stream: DOCX pipeline generates resume → creates Google Doc → returns metadata."""
+    """SSE stream: native Docs API pipeline generates resume → returns metadata."""
     body = await request.json()
     title: str = body.get("title", "Tailored Resume").strip() or "Tailored Resume"
     job_description: str = body.get("job_description", "")
@@ -237,6 +237,9 @@ async def generate_resume(
     if not job_description.strip():
         raise HTTPException(status_code=422, detail="job_description is required")
 
+    if not source_doc_id:
+        raise HTTPException(status_code=422, detail="source_doc_id is required")
+
     if not has_drive_access(user["sub"]):
         raise HTTPException(status_code=403, detail="Google Drive not connected")
 
@@ -246,26 +249,8 @@ async def generate_resume(
         raise HTTPException(status_code=503, detail=str(exc))
 
     async def event_stream():
-        # Step 1: export or build source DOCX
-        source_docx_bytes: Optional[bytes] = None
-        if source_doc_id:
-            yield f"data: {json.dumps({'status': 'exporting', 'message': 'Exporting source document\u2026'})}\n\n"
-            try:
-                source_docx_bytes = await export_doc_as_docx(user["sub"], source_doc_id)
-            except Exception as e:
-                yield f"data: {json.dumps({'status': 'error', 'message': f'Could not export source doc: {e}'})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-        else:
-            yield f"data: {json.dumps({'status': 'exporting', 'message': 'Preparing resume\u2026'})}\n\n"
-            import storage
-            base_resume = storage.load_resume(user["sub"])
-            try:
-                source_docx_bytes = _markdown_to_docx_bytes(base_resume)
-            except Exception as e:
-                yield f"data: {json.dumps({'status': 'error', 'message': f'Could not build DOCX from resume: {e}'})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
+        # Step 1: copy source document
+        yield f"data: {json.dumps({'status': 'copying', 'message': 'Copying source document\u2026'})}\n\n"
 
         # Step 2: analyze sections
         yield f"data: {json.dumps({'status': 'analyzing', 'message': 'Analyzing sections\u2026'})}\n\n"
@@ -273,14 +258,13 @@ async def generate_resume(
         # Step 3: generate optimized content
         yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating optimized content\u2026'})}\n\n"
 
-        # Step 4: create Google Doc (runs steps 3-7 of the pipeline internally)
-        yield f"data: {json.dumps({'status': 'creating_doc', 'message': 'Creating Google Doc\u2026'})}\n\n"
+        # Step 4: apply optimized content back to the copied doc
+        yield f"data: {json.dumps({'status': 'applying', 'message': 'Applying optimized content\u2026'})}\n\n"
         try:
             folder_id = await get_or_create_folder(user["sub"])
-            doc_data = await generate_resume_docx(
+            doc_data = await generate_resume_native(
                 user_id=user["sub"],
-                source_doc_id=None,  # already have bytes
-                source_docx_bytes=source_docx_bytes,
+                source_doc_id=source_doc_id,
                 title=title,
                 job_description=job_description,
                 custom_instructions=custom_instructions,
@@ -289,7 +273,7 @@ async def generate_resume(
                 llm_model=llm_model,
             )
         except Exception as e:
-            yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create Google Doc: {e}'})}\n\n"
+            yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to generate resume: {e}'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 

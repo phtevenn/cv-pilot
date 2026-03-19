@@ -979,6 +979,317 @@ async def generate_resume_docx(
     return doc_data
 
 
+async def copy_drive_file(user_id: str, file_id: str, new_title: str, folder_id: str) -> dict:
+    """Copy a Drive file into folder_id with new_title. Returns Drive file metadata dict."""
+    access_token = await _get_valid_access_token(user_id)
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{_DRIVE_FILES_URL}/{file_id}/copy",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            params={"fields": "id,name,webViewLink,createdTime,modifiedTime"},
+            json={"name": new_title, "parents": [folder_id]},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Drive copy failed ({resp.status_code}): {resp.text[:500]}")
+        return resp.json()
+
+
+async def read_google_doc(user_id: str, doc_id: str) -> dict:
+    """Fetch full document via GET https://docs.googleapis.com/v1/documents/{docId}"""
+    access_token = await _get_valid_access_token(user_id)
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_DOCS_API}/{doc_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Docs API read failed ({resp.status_code}): {resp.text[:500]}")
+        return resp.json()
+
+
+def _extract_paragraphs(doc: dict) -> list[dict]:
+    """
+    Parse Docs API document into flat list of paragraphs.
+    Each dict: {"text": str, "start": int, "end": int}
+    - text: full paragraph text including trailing \\n (from joining all textRun elements)
+    - start/end: paragraph's startIndex/endIndex from the API
+    Skip structural elements that are not paragraphs (sectionBreak, etc.).
+    Skip paragraphs whose text is only whitespace/newline.
+    """
+    paragraphs = []
+    content = doc.get("body", {}).get("content", [])
+    for element in content:
+        para = element.get("paragraph")
+        if para is None:
+            continue
+        start = element.get("startIndex", 0)
+        end = element.get("endIndex", 0)
+        # Join all textRun content
+        text = ""
+        for el in para.get("elements", []):
+            tr = el.get("textRun")
+            if tr:
+                text += tr.get("content", "")
+        # Skip paragraphs that are only whitespace/newline
+        if not text.strip():
+            continue
+        paragraphs.append({"text": text, "start": start, "end": end})
+    return paragraphs
+
+
+async def apply_paragraph_replacements(
+    user_id: str, doc_id: str, replacements: list[dict]
+) -> None:
+    """
+    Apply text replacements to a Google Doc via Docs API batchUpdate.
+    replacements: list of {"start": int, "end": int, "new_text": str}
+      - start/end are the paragraph's startIndex/endIndex from the Docs API
+      - new_text is the replacement content (WITHOUT trailing newline)
+
+    For each replacement:
+      - deleteContentRange from start to end-1 (removes text but keeps the paragraph \\n)
+      - insertText at start with new_text
+
+    IMPORTANT: sort replacements by start descending (back-to-front) so earlier
+    indices are not invalidated by later insertions/deletions.
+
+    Send as a single batchUpdate call with all requests.
+    POST https://docs.googleapis.com/v1/documents/{docId}:batchUpdate
+    """
+    if not replacements:
+        return
+
+    # Sort back-to-front so indices don't shift
+    sorted_replacements = sorted(replacements, key=lambda r: r["start"], reverse=True)
+
+    requests = []
+    for rep in sorted_replacements:
+        start = rep["start"]
+        end = rep["end"]
+        new_text = rep["new_text"]
+        # Delete text content but keep the trailing newline (end-1)
+        delete_end = end - 1
+        if delete_end > start:
+            requests.append({
+                "deleteContentRange": {
+                    "range": {"startIndex": start, "endIndex": delete_end}
+                }
+            })
+        # Insert new text at start position
+        if new_text:
+            requests.append({
+                "insertText": {
+                    "location": {"index": start},
+                    "text": new_text,
+                }
+            })
+
+    if not requests:
+        return
+
+    access_token = await _get_valid_access_token(user_id)
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{_DOCS_API}/{doc_id}:batchUpdate",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={"requests": requests},
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"batchUpdate failed ({resp.status_code}): {resp.text[:1000]}")
+
+
+_SECTION_HEADING_PAT = _re.compile(r'^[A-Z][A-Z0-9 /&()\-]{2,}$')
+
+
+def _is_section_heading(text: str) -> bool:
+    """Return True if the paragraph text looks like a section heading (all-caps)."""
+    stripped = text.strip().rstrip('\n')
+    return bool(_SECTION_HEADING_PAT.match(stripped))
+
+
+async def generate_resume_native(
+    user_id: str,
+    source_doc_id: str,
+    title: str,
+    job_description: str,
+    custom_instructions: str,
+    folder_id: str,
+    llm_client,
+    llm_model: str,
+) -> dict:
+    """
+    Full native pipeline:
+    1. Copy source doc -> new doc in folder_id with title
+    2. Read new doc content via Docs API
+    3. Extract paragraphs, build section-based text for LLM
+    4. LLM rewrites paragraphs section by section
+    5. Match LLM output paragraphs back to original doc paragraphs
+    6. Apply changes via apply_paragraph_replacements
+    7. Return Drive file metadata for the new doc
+    """
+    # Step 1: Copy source doc
+    doc_data = await copy_drive_file(user_id, source_doc_id, title, folder_id)
+    new_doc_id = doc_data["id"]
+
+    # Step 2: Read new doc content
+    doc = await read_google_doc(user_id, new_doc_id)
+
+    # Step 3: Extract paragraphs
+    paragraphs = _extract_paragraphs(doc)
+
+    # Group paragraphs into sections
+    # Find section boundaries (all-caps headings)
+    sections: list[dict] = []  # {"heading": str, "heading_idx": int, "paras": list[dict]}
+    current_section: Optional[dict] = None
+    header_paras: list[dict] = []
+    in_header = True
+
+    for i, para in enumerate(paragraphs):
+        text = para["text"].rstrip('\n')
+        if _is_section_heading(text):
+            in_header = False
+            if current_section is not None:
+                sections.append(current_section)
+            current_section = {"heading": text, "heading_idx": i, "paras": []}
+        elif in_header:
+            header_paras.append(para)
+        elif current_section is not None:
+            current_section["paras"].append(para)
+
+    if current_section is not None:
+        sections.append(current_section)
+
+    # Build text for LLM with [TAB] markers
+    def _para_text_for_llm(text: str) -> str:
+        return text.rstrip('\n').replace('\t', '[TAB]')
+
+    llm_sections_input = []
+    # Include header paragraphs under a "header" pseudo-section
+    if header_paras:
+        header_lines = [_para_text_for_llm(p["text"]) for p in header_paras]
+        llm_sections_input.append({"heading": "header", "paragraphs": header_lines})
+
+    for sec in sections:
+        body_lines = [_para_text_for_llm(p["text"]) for p in sec["paras"]]
+        llm_sections_input.append({"heading": sec["heading"], "paragraphs": body_lines})
+
+    sections_text = ""
+    for sec_input in llm_sections_input:
+        heading = sec_input["heading"]
+        lines = "\n".join(sec_input["paragraphs"])
+        sections_text += f"\n\n### {heading}\n{lines}"
+
+    system_prompt = (
+        "You are a resume optimizer. Given a resume and job description, rewrite the resume "
+        "content to better target the role. "
+        "\n\n"
+        "Return ONLY valid JSON:\n"
+        "{\"sections\": [{\"heading\": \"<exact heading>\", \"paragraphs\": [\"line1\", \"line2\", ...]}]}"
+        "\n\nRules:\n"
+        "- Preserve every section heading exactly as given\n"
+        "- Output the same number of paragraphs per section as the input "
+        "(add blank \"\" for removed lines, split one line into two only if needed — keep counts close)\n"
+        "- IMPORTANT: [TAB] markers must be preserved exactly — they control layout\n"
+        "- Do not add or remove sections\n"
+        "- Strengthen bullet points with impact-driven language from the job description\n"
+        "- Do not invent credentials not in the original"
+    )
+
+    user_message = (
+        f"## Resume Sections\n{sections_text}\n\n"
+        f"## Job Description\n\n{job_description}"
+    )
+    if custom_instructions:
+        user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
+
+    # Step 4: Call LLM (non-streaming)
+    full_output = ""
+    if isinstance(llm_client, AsyncAnthropic):
+        response = await llm_client.messages.create(
+            model=llm_model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        full_output = response.content[0].text
+    else:
+        # OpenAI-compatible client
+        response = await llm_client.chat.completions.create(
+            model=llm_model,
+            max_tokens=4096,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        full_output = response.choices[0].message.content or ""
+
+    # Parse JSON response
+    try:
+        cleaned = full_output.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+        result_json = json.loads(cleaned)
+        llm_sections_output = result_json.get("sections", [])
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise ValueError(f"LLM returned invalid JSON: {exc}\n\nRaw output:\n{full_output[:500]}")
+
+    # Step 5: Match LLM output back to original paragraphs and build replacements
+    # Build a lookup from heading -> LLM output paragraphs
+    llm_output_map: dict[str, list[str]] = {}
+    for sec_out in llm_sections_output:
+        heading = sec_out.get("heading", "")
+        llm_output_map[heading] = sec_out.get("paragraphs", [])
+
+    replacements: list[dict] = []
+
+    def _add_replacement(para: dict, new_text: str) -> None:
+        """Queue a replacement if the text actually changed."""
+        old_text = para["text"].rstrip('\n')
+        # Restore [TAB] back to \t
+        new_text_restored = new_text.replace('[TAB]', '\t')
+        if old_text == new_text_restored:
+            return  # no-op
+        if new_text_restored == "":
+            return  # skip clearing paragraphs
+        replacements.append({
+            "start": para["start"],
+            "end": para["end"],
+            "new_text": new_text_restored,
+        })
+
+    # Apply header section
+    if header_paras and "header" in llm_output_map:
+        llm_header_paras = llm_output_map["header"]
+        for i, para in enumerate(header_paras):
+            if i < len(llm_header_paras):
+                _add_replacement(para, llm_header_paras[i])
+            # If LLM has fewer, skip extras (leave original)
+
+    # Apply body sections (skip section heading paragraphs themselves)
+    for sec in sections:
+        heading = sec["heading"]
+        if heading not in llm_output_map:
+            continue
+        llm_body_paras = llm_output_map[heading]
+        doc_body_paras = sec["paras"]
+        # Zip positionally, only apply up to doc paragraph count
+        for i, para in enumerate(doc_body_paras):
+            if i < len(llm_body_paras):
+                _add_replacement(para, llm_body_paras[i])
+            # If LLM has fewer, leave remaining doc paragraphs unchanged
+
+    # Step 6: Apply all replacements back-to-front
+    await apply_paragraph_replacements(user_id, new_doc_id, replacements)
+
+    return doc_data
+
+
 async def set_doc_margins(user_id: str, doc_id: str) -> None:
     """Use the Google Docs API to set 0.75in page margins. Non-fatal on failure."""
     try:
