@@ -1101,15 +1101,6 @@ async def apply_paragraph_replacements(
             raise RuntimeError(f"batchUpdate failed ({resp.status_code}): {resp.text[:1000]}")
 
 
-_SECTION_HEADING_PAT = _re.compile(r'^[A-Z][A-Z0-9 /&()\-]{2,}$')
-
-
-def _is_section_heading(text: str) -> bool:
-    """Return True if the paragraph text looks like a section heading (all-caps)."""
-    stripped = text.strip().rstrip('\n')
-    return bool(_SECTION_HEADING_PAT.match(stripped))
-
-
 async def generate_resume_native(
     user_id: str,
     source_doc_id: str,
@@ -1124,10 +1115,10 @@ async def generate_resume_native(
     Full native pipeline:
     1. Copy source doc -> new doc in folder_id with title
     2. Read new doc content via Docs API
-    3. Extract paragraphs, build section-based text for LLM
-    4. LLM rewrites paragraphs section by section
-    5. Match LLM output paragraphs back to original doc paragraphs
-    6. Apply changes via apply_paragraph_replacements
+    3. Extract paragraphs (flat list, non-blank only, each has text/start/end)
+    4. Build numbered paragraph list for LLM
+    5. LLM returns only the paragraphs it wants to change, by index
+    6. Look up each index in the flat paragraph array, apply via apply_paragraph_replacements
     7. Return Drive file metadata for the new doc
     """
     # Step 1: Copy source doc
@@ -1137,89 +1128,53 @@ async def generate_resume_native(
     # Step 2: Read new doc content
     doc = await read_google_doc(user_id, new_doc_id)
 
-    # Step 3: Extract paragraphs
+    # Step 3: Extract paragraphs (flat list, non-blank only, each has text/start/end)
     paragraphs = _extract_paragraphs(doc)
 
-    # Group paragraphs into sections
-    # Find section boundaries (all-caps headings)
-    sections: list[dict] = []  # {"heading": str, "heading_idx": int, "paras": list[dict]}
-    current_section: Optional[dict] = None
-    header_paras: list[dict] = []
-    in_header = True
-
+    # Step 4: Build numbered paragraph list for LLM
+    # Replace literal \t with [TAB] so the LLM sees and preserves them
+    numbered_lines = []
     for i, para in enumerate(paragraphs):
-        text = para["text"].rstrip('\n')
-        if _is_section_heading(text):
-            in_header = False
-            if current_section is not None:
-                sections.append(current_section)
-            current_section = {"heading": text, "heading_idx": i, "paras": []}
-        elif in_header:
-            header_paras.append(para)
-        elif current_section is not None:
-            current_section["paras"].append(para)
+        text = para["text"].rstrip("\n").replace("\t", "[TAB]")
+        numbered_lines.append(f"Paragraph {i}: {text}")
+    doc_text = "\n".join(numbered_lines)
 
-    if current_section is not None:
-        sections.append(current_section)
+    system_prompt = """\
+You are a resume optimizer. Given a numbered list of resume paragraphs and a job description, \
+rewrite the resume content to better target the role.
 
-    # Build text for LLM with [TAB] markers
-    def _para_text_for_llm(text: str) -> str:
-        return text.rstrip('\n').replace('\t', '[TAB]')
+Return ONLY valid JSON in this exact format:
+{"replacements": [{"index": <paragraph_number>, "text": "<new_text>"}]}
 
-    llm_sections_input = []
-    # Include header paragraphs under a "header" pseudo-section
-    if header_paras:
-        header_lines = [_para_text_for_llm(p["text"]) for p in header_paras]
-        llm_sections_input.append({"heading": "header", "paragraphs": header_lines})
+Rules:
+- Only include paragraphs you are changing. Omit paragraphs that stay the same.
+- Do NOT rewrite section headings (ALL CAPS lines like WORK EXPERIENCE, EDUCATION, SKILLS, etc.)
+- Do NOT rewrite the name or contact info lines
+- Strengthen bullet points with impact-driven language and keywords from the job description
+- Do not invent experience or credentials not present in the original
+- Preserve [TAB] markers exactly — they control layout alignment
+- You may reorder bullet points within a section but do not move content between sections
+- Do not add new paragraphs (only rewrite existing ones by index)\
+"""
 
-    for sec in sections:
-        body_lines = [_para_text_for_llm(p["text"]) for p in sec["paras"]]
-        llm_sections_input.append({"heading": sec["heading"], "paragraphs": body_lines})
-
-    sections_text = ""
-    for sec_input in llm_sections_input:
-        heading = sec_input["heading"]
-        lines = "\n".join(sec_input["paragraphs"])
-        sections_text += f"\n\n### {heading}\n{lines}"
-
-    system_prompt = (
-        "You are a resume optimizer. Given a resume and job description, rewrite the resume "
-        "content to better target the role. "
-        "\n\n"
-        "Return ONLY valid JSON:\n"
-        "{\"sections\": [{\"heading\": \"<exact heading>\", \"paragraphs\": [\"line1\", \"line2\", ...]}]}"
-        "\n\nRules:\n"
-        "- Preserve every section heading exactly as given\n"
-        "- Output the same number of paragraphs per section as the input "
-        "(add blank \"\" for removed lines, split one line into two only if needed — keep counts close)\n"
-        "- IMPORTANT: [TAB] markers must be preserved exactly — they control layout\n"
-        "- Do not add or remove sections\n"
-        "- Strengthen bullet points with impact-driven language from the job description\n"
-        "- Do not invent credentials not in the original"
-    )
-
-    user_message = (
-        f"## Resume Sections\n{sections_text}\n\n"
-        f"## Job Description\n\n{job_description}"
-    )
+    user_message = f"## Resume Paragraphs\n\n{doc_text}\n\n## Job Description\n\n{job_description}"
     if custom_instructions:
         user_message += f"\n\n## Additional Instructions\n\n{custom_instructions}"
 
-    # Step 4: Call LLM (non-streaming)
+    # Step 5: Call LLM
     full_output = ""
     if isinstance(llm_client, AsyncAnthropic):
         response = await llm_client.messages.create(
             model=llm_model,
-            max_tokens=4096,
+            max_tokens=8192,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )
         full_output = response.content[0].text
     else:
-        # OpenAI-compatible client
         response = await llm_client.chat.completions.create(
             model=llm_model,
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -1227,64 +1182,38 @@ async def generate_resume_native(
         )
         full_output = response.choices[0].message.content or ""
 
-    # Parse JSON response
+    # Step 6: Parse JSON response
     try:
         cleaned = full_output.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
+            cleaned = cleaned.rstrip("`").rstrip()
         result_json = json.loads(cleaned)
-        llm_sections_output = result_json.get("sections", [])
+        raw_replacements = result_json.get("replacements", [])
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError(f"LLM returned invalid JSON: {exc}\n\nRaw output:\n{full_output[:500]}")
 
-    # Step 5: Match LLM output back to original paragraphs and build replacements
-    # Build a lookup from heading -> LLM output paragraphs
-    llm_output_map: dict[str, list[str]] = {}
-    for sec_out in llm_sections_output:
-        heading = sec_out.get("heading", "")
-        llm_output_map[heading] = sec_out.get("paragraphs", [])
-
-    replacements: list[dict] = []
-
-    def _add_replacement(para: dict, new_text: str) -> None:
-        """Queue a replacement if the text actually changed."""
-        old_text = para["text"].rstrip('\n')
-        # Restore [TAB] back to \t
-        new_text_restored = new_text.replace('[TAB]', '\t')
+    # Step 7: Build replacement list using paragraph indices
+    replacements = []
+    for item in raw_replacements:
+        idx = item.get("index")
+        new_text = item.get("text", "")
+        if idx is None or not isinstance(idx, int) or idx < 0 or idx >= len(paragraphs):
+            continue  # ignore out-of-range or malformed entries
+        if not new_text or not new_text.strip():
+            continue  # skip empty replacements
+        para = paragraphs[idx]
+        old_text = para["text"].rstrip("\n")
+        new_text_restored = new_text.replace("[TAB]", "\t")
         if old_text == new_text_restored:
-            return  # no-op
-        if new_text_restored == "":
-            return  # skip clearing paragraphs
+            continue  # no-op
         replacements.append({
             "start": para["start"],
             "end": para["end"],
             "new_text": new_text_restored,
         })
 
-    # Apply header section
-    if header_paras and "header" in llm_output_map:
-        llm_header_paras = llm_output_map["header"]
-        for i, para in enumerate(header_paras):
-            if i < len(llm_header_paras):
-                _add_replacement(para, llm_header_paras[i])
-            # If LLM has fewer, skip extras (leave original)
-
-    # Apply body sections (skip section heading paragraphs themselves)
-    for sec in sections:
-        heading = sec["heading"]
-        if heading not in llm_output_map:
-            continue
-        llm_body_paras = llm_output_map[heading]
-        doc_body_paras = sec["paras"]
-        # Zip positionally, only apply up to doc paragraph count
-        for i, para in enumerate(doc_body_paras):
-            if i < len(llm_body_paras):
-                _add_replacement(para, llm_body_paras[i])
-            # If LLM has fewer, leave remaining doc paragraphs unchanged
-
-    # Step 6: Apply all replacements back-to-front
+    # Step 8: Apply replacements back-to-front
     await apply_paragraph_replacements(user_id, new_doc_id, replacements)
 
     return doc_data
