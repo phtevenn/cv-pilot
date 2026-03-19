@@ -250,16 +250,16 @@ async def generate_resume(
 
     async def event_stream():
         # Step 1: copy source document
-        yield f"data: {json.dumps({'status': 'copying', 'message': 'Copying source document\u2026'})}\n\n"
+        yield "data: " + json.dumps({"status": "copying", "message": "Copying source document\u2026"}) + "\n\n"
 
         # Step 2: analyze sections
-        yield f"data: {json.dumps({'status': 'analyzing', 'message': 'Analyzing sections\u2026'})}\n\n"
+        yield "data: " + json.dumps({"status": "analyzing", "message": "Analyzing sections\u2026"}) + "\n\n"
 
         # Step 3: generate optimized content
-        yield f"data: {json.dumps({'status': 'generating', 'message': 'Generating optimized content\u2026'})}\n\n"
+        yield "data: " + json.dumps({"status": "generating", "message": "Generating optimized content\u2026"}) + "\n\n"
 
         # Step 4: apply optimized content back to the copied doc
-        yield f"data: {json.dumps({'status': 'applying', 'message': 'Applying optimized content\u2026'})}\n\n"
+        yield "data: " + json.dumps({"status": "applying", "message": "Applying optimized content\u2026"}) + "\n\n"
         try:
             folder_id = await get_or_create_folder(user["sub"])
             doc_data = await generate_resume_native(
