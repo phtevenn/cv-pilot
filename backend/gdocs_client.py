@@ -1,5 +1,6 @@
 """Google Drive / Docs API helpers."""
 import json
+import re as _re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -1012,10 +1013,11 @@ async def read_google_doc(user_id: str, doc_id: str) -> dict:
 def _extract_paragraphs(doc: dict) -> list[dict]:
     """
     Parse Docs API document into flat list of paragraphs.
-    Each dict: {"text": str, "start": int, "end": int}
-    - text: full paragraph text including trailing \\n (from joining all textRun elements)
+    Each dict: {"text": str, "start": int, "end": int, "runs": list[dict]}
+    - text: full paragraph text including trailing \\n
     - start/end: paragraph's startIndex/endIndex from the API
-    Skip structural elements that are not paragraphs (sectionBreak, etc.).
+    - runs: list of {"text": str, "bold": bool, "italic": bool, "start": int, "end": int}
+    Skip structural elements that are not paragraphs.
     Skip paragraphs whose text is only whitespace/newline.
     """
     paragraphs = []
@@ -1026,17 +1028,101 @@ def _extract_paragraphs(doc: dict) -> list[dict]:
             continue
         start = element.get("startIndex", 0)
         end = element.get("endIndex", 0)
-        # Join all textRun content
+        runs = []
         text = ""
         for el in para.get("elements", []):
             tr = el.get("textRun")
             if tr:
-                text += tr.get("content", "")
-        # Skip paragraphs that are only whitespace/newline
+                run_text = tr.get("content", "")
+                ts = tr.get("textStyle", {})
+                bold = bool(ts.get("bold", False))
+                italic = bool(ts.get("italic", False))
+                run_start = el.get("startIndex", 0)
+                run_end = el.get("endIndex", 0)
+                if run_text:
+                    runs.append({
+                        "text": run_text,
+                        "bold": bold,
+                        "italic": italic,
+                        "start": run_start,
+                        "end": run_end,
+                    })
+                text += run_text
         if not text.strip():
             continue
-        paragraphs.append({"text": text, "start": start, "end": end})
+        paragraphs.append({"text": text, "start": start, "end": end, "runs": runs})
     return paragraphs
+
+
+def _para_to_markdown(para: dict) -> str:
+    """
+    Render a paragraph's runs as a markdown string for display in the LLM prompt.
+    Bold runs are wrapped in **...**, italic in *...*, bold+italic in ***...***.
+    Tabs are replaced with [TAB]. The trailing newline is stripped.
+    Falls back to plain text if the paragraph has no runs.
+    """
+    runs = para.get("runs", [])
+    if not runs:
+        return para.get("text", "").rstrip("\n").replace("\t", "[TAB]")
+    parts = []
+    for i, run in enumerate(runs):
+        text = run["text"]
+        # Strip trailing newline (paragraph end-mark lives in the last run)
+        if i == len(runs) - 1:
+            text = text.rstrip("\n")
+        text = text.replace("\t", "[TAB]")
+        if not text:
+            continue
+        if run.get("bold") and run.get("italic"):
+            parts.append(f"***{text}***")
+        elif run.get("bold"):
+            parts.append(f"**{text}**")
+        elif run.get("italic"):
+            parts.append(f"*{text}*")
+        else:
+            parts.append(text)
+    return "".join(parts)
+
+
+def _parse_markdown_runs(text: str) -> list[dict]:
+    """
+    Parse a markdown-formatted string into a list of runs, each with explicit
+    bold/italic flags and plain text (no markdown markers).
+
+    Handles (in precedence order): ***bold+italic***, **bold**, *italic*, plain text.
+    [TAB] markers are replaced with actual tab characters in run text.
+
+    Returns list of {"text": str, "bold": bool, "italic": bool}.
+    Gracefully handles malformed or unclosed markers by treating the rest as plain text.
+    Empty runs are omitted.
+    """
+    runs: list[dict] = []
+    # Precedence: ***...*** > **...** > *...*
+    pattern = _re.compile(r'\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*', _re.DOTALL)
+    pos = 0
+    for m in pattern.finditer(text):
+        if m.start() > pos:
+            plain = text[pos:m.start()].replace("[TAB]", "\t")
+            if plain:
+                runs.append({"text": plain, "bold": False, "italic": False})
+        if m.group(1) is not None:  # ***bold+italic***
+            t = m.group(1).replace("[TAB]", "\t")
+            if t:
+                runs.append({"text": t, "bold": True, "italic": True})
+        elif m.group(2) is not None:  # **bold**
+            t = m.group(2).replace("[TAB]", "\t")
+            if t:
+                runs.append({"text": t, "bold": True, "italic": False})
+        elif m.group(3) is not None:  # *italic*
+            t = m.group(3).replace("[TAB]", "\t")
+            if t:
+                runs.append({"text": t, "bold": False, "italic": True})
+        pos = m.end()
+    if pos < len(text):
+        plain = text[pos:].replace("[TAB]", "\t")
+        if plain:
+            runs.append({"text": plain, "bold": False, "italic": False})
+    return runs
 
 
 async def apply_paragraph_replacements(
@@ -1061,7 +1147,7 @@ async def apply_paragraph_replacements(
     if not replacements:
         return
 
-    # Sort back-to-front so indices don't shift
+    # Sort back-to-front so indices don't shift when applying sequentially
     sorted_replacements = sorted(replacements, key=lambda r: r["start"], reverse=True)
 
     requests = []
@@ -1069,6 +1155,8 @@ async def apply_paragraph_replacements(
         start = rep["start"]
         end = rep["end"]
         new_text = rep["new_text"]
+        runs = rep.get("runs")  # optional list of {"text", "bold", "italic"}
+
         # Delete text content but keep the trailing newline (end-1)
         delete_end = end - 1
         if delete_end > start:
@@ -1077,6 +1165,7 @@ async def apply_paragraph_replacements(
                     "range": {"startIndex": start, "endIndex": delete_end}
                 }
             })
+
         # Insert new text at start position
         if new_text:
             requests.append({
@@ -1085,6 +1174,34 @@ async def apply_paragraph_replacements(
                     "text": new_text,
                 }
             })
+
+        # Apply explicit text style per run to override inherited formatting.
+        # This is critical for mixed-format paragraphs where insertText would
+        # otherwise inherit the style of the paragraph's end-mark (unpredictable).
+        if runs and new_text:
+            pos = start
+            for run in runs:
+                run_len = len(run["text"])
+                if run_len == 0:
+                    continue
+                run_end = pos + run_len
+                style: dict = {}
+                fields: list[str] = []
+                if run.get("bold") is not None:
+                    style["bold"] = run["bold"]
+                    fields.append("bold")
+                if run.get("italic") is not None:
+                    style["italic"] = run["italic"]
+                    fields.append("italic")
+                if style:
+                    requests.append({
+                        "updateTextStyle": {
+                            "range": {"startIndex": pos, "endIndex": run_end},
+                            "textStyle": style,
+                            "fields": ",".join(fields),
+                        }
+                    })
+                pos = run_end
 
     if not requests:
         return
@@ -1131,12 +1248,13 @@ async def generate_resume_native(
     # Step 3: Extract paragraphs (flat list, non-blank only, each has text/start/end)
     paragraphs = _extract_paragraphs(doc)
 
-    # Step 4: Build numbered paragraph list for LLM
-    # Replace literal \t with [TAB] so the LLM sees and preserves them
+    # Step 4: Build numbered paragraph list for LLM with formatting context.
+    # Each paragraph is rendered as markdown (**bold**, *italic*) so the LLM
+    # can see and replicate the formatting intent in its output.
     numbered_lines = []
     for i, para in enumerate(paragraphs):
-        text = para["text"].rstrip("\n").replace("\t", "[TAB]")
-        numbered_lines.append(f"Paragraph {i}: {text}")
+        formatted = _para_to_markdown(para)
+        numbered_lines.append(f"Paragraph {i}: {formatted}")
     doc_text = "\n".join(numbered_lines)
 
     system_prompt = """\
@@ -1154,7 +1272,13 @@ Rules:
 - Do not invent experience or credentials not present in the original
 - Preserve [TAB] markers exactly — they control layout alignment
 - You may reorder bullet points within a section but do not move content between sections
-- Do not add new paragraphs (only rewrite existing ones by index)\
+- Do not add new paragraphs (only rewrite existing ones by index)
+- FORMATTING: The paragraphs above show formatting using **bold** and *italic* markers. \
+Your output text must use the same markers to explicitly specify formatting. \
+Match the formatting pattern of the original paragraph — for example, if the original has \
+**bold company name**[TAB]plain date, preserve that structure in your rewrite. \
+You may change formatting intentionally (e.g. make a newly added label bold), \
+but never silently drop formatting that was present in the original.\
 """
 
     user_message = f"## Resume Paragraphs\n\n{doc_text}\n\n## Job Description\n\n{job_description}"
@@ -1193,24 +1317,30 @@ Rules:
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError(f"LLM returned invalid JSON: {exc}\n\nRaw output:\n{full_output[:500]}")
 
-    # Step 7: Build replacement list using paragraph indices
+    # Step 7: Build replacement list using paragraph indices.
+    # Parse markdown formatting markers from LLM output into explicit runs so that
+    # apply_paragraph_replacements can apply updateTextStyle — overriding the
+    # unpredictable formatting inherited from the paragraph end-mark.
     replacements = []
     for item in raw_replacements:
         idx = item.get("index")
-        new_text = item.get("text", "")
+        text_with_markers = item.get("text", "")
         if idx is None or not isinstance(idx, int) or idx < 0 or idx >= len(paragraphs):
             continue  # ignore out-of-range or malformed entries
-        if not new_text or not new_text.strip():
+        if not text_with_markers or not text_with_markers.strip():
             continue  # skip empty replacements
         para = paragraphs[idx]
+        # Parse markdown markers into explicit runs (handles **bold**, *italic*, plain)
+        runs = _parse_markdown_runs(text_with_markers)
+        new_text_plain = "".join(r["text"] for r in runs)
         old_text = para["text"].rstrip("\n")
-        new_text_restored = new_text.replace("[TAB]", "\t")
-        if old_text == new_text_restored:
-            continue  # no-op
+        if old_text == new_text_plain:
+            continue  # no-op (text unchanged — formatting diff alone doesn't apply here)
         replacements.append({
             "start": para["start"],
             "end": para["end"],
-            "new_text": new_text_restored,
+            "new_text": new_text_plain,
+            "runs": runs,
         })
 
     # Step 8: Apply replacements back-to-front
