@@ -216,13 +216,13 @@ function NewResumeModal({ categories, onClose, onSuccess }: NewResumeModalProps)
           custom_instructions: customInstructions.trim() || null,
         },
         (event: GDocGenerateEvent) => {
-          if (event.status === 'exporting') {
+          if (event.status === 'copying') {
             setStatusMessage(event.message ?? 'Exporting source document…')
           } else if (event.status === 'analyzing') {
             setStatusMessage(event.message ?? 'Analyzing resume and job description…')
           } else if (event.status === 'generating') {
             setStatusMessage(event.message ?? 'Generating tailored resume with AI…')
-          } else if (event.status === 'creating_doc') {
+          } else if (event.status === 'applying') {
             setStatusMessage(event.message ?? 'Creating Google Doc…')
           } else if (event.status === 'error') {
             setError(event.message ?? 'An error occurred during generation.')

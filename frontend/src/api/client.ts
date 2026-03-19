@@ -122,7 +122,7 @@ export interface GDocResumeMeta {
 }
 
 export interface GDocGenerateEvent {
-  status: 'exporting' | 'analyzing' | 'generating' | 'creating_doc' | 'done' | 'error'
+  status: 'copying' | 'analyzing' | 'generating' | 'applying' | 'done' | 'error'
   message?: string
   // present when status === 'done':
   id?: string
